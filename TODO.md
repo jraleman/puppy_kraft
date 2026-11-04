@@ -8,6 +8,13 @@ item works **and** its tests pass. Each phase ends with an exit check.
 `§n` points at the matching section of `DESIGN.md`. Run commands from
 `godot-base/`. Framework rules from the root `AGENTS.md` still apply.
 
+**Current deliverable:** Phase 0 plus the playable/saved Milestones 1-2 spike,
+keyboard and mouse first. This is not the entire v1 slice. Seven headless game
+suites, the windowed world-view suite and all 15 host suites pass; scene checks
+also run windowed. The desktop profile and remaining manual gates are recorded
+below. Changes are left unstaged/uncommitted for the owner; existing staged
+design/tracker edits are preserved.
+
 ---
 
 ## Blocked on the owner (DESIGN §19)
@@ -23,9 +30,9 @@ below that depends on one should start until it is answered.
 - [x] **Co-op** — same-screen, simultaneous Pack mode (§10.1).
 - [ ] **Clear the title** (§19.1) — "Kraft" and "-craft" sit near existing
       marks. Blocks `custom_user_dir_name` in Milestone 13.
-- [ ] **The pup's name** (§19.2) — default name, typed name or none. Blocks the
-      intro copy and the Den Door's new-world form (Milestone 2).
-- [ ] **Overlap with Dulce's Adventure** (§19.3) — a second side-on dog game.
+- [x] **The pup's name** (§19.2) — player-chosen at world creation; blank means
+      **Pup**. The Den Door, HUD and saved state use it.
+- [ ] **Overlap with Dolce's Adventure** (§19.3) — a second side-on dog game.
       Blocks the final art direction (Milestone 6 onwards).
 - [ ] **The v1 boss** (§19.4) — the Mailman King, and a look clear of any real
       postal service. Blocks Milestone 8.
@@ -40,29 +47,27 @@ below that depends on one should start until it is answered.
 
 ## Discrepancies found while planning
 
-- [ ] The request called the game "Puppy Craft" (`puppy_craft`), the pitch
-      "Puppy Kraft", and the folder and remote are `puppy_kraft`. The docs use
-      `puppy_kraft` throughout. If the title changes, rename before Phase 0.
-- [ ] The project targets Godot **4.7**, but this machine has **4.6.2**
-      (`/usr/bin/godot`). Install 4.7 before trusting any test result.
-- [ ] `menu_order = 13` assumes Dulce's Adventure (`9`), Sailor Man (`10`),
-      Capitan's Walk (`11`) and Tifo Beato (`12`) keep their planned slots. All
-      four are design-only so far. Keep `13` anyway so the order doesn't shift.
-- [ ] `save_files` takes **fixed paths**, so worlds are three fixed slots
-      (§3.8), not an open list. Accept that, or raise a framework change.
-- [ ] There is no framework world-select screen. The Den Door is a game-owned
-      panel inside `gameplay.tscn` (§14.3). Check it fits before the shell's
-      round starts.
+- [x] Keep **Puppy Kraft** / `puppy_kraft` as the working name/id. No Phase 0
+      rename; release title clearance remains separate.
+- [x] Godot **4.7.2** is installed through Scoop on the Windows implementation
+      host. The earlier 4.6.2 Linux tooling note does not describe this host.
+- [x] Keep `menu_order = 13`, reserved after Dolce's Adventure (`9`), Sailor
+      Man (`10`), Capitan's Walk (`11`) and Tifo Beato (`12`). Discovery works
+      without changing shared catalog code.
+- [x] `save_files` uses three fixed world slots (§3.8), not an open list.
+- [x] The game-owned Den Door fits inside `gameplay.tscn` (§14.3). The shell
+      stays untimed while it is visible; no world ticks before selection.
 - [ ] `control_bindings` document `"player"` as 0, 1 or −1. Check that a third
       simultaneous seat (`"player": 2`) works in `Settings` and the Controls
       tab, or raise it as framework data (§15).
-- [ ] The shell's pause → quit path must leave time to autosave (§2.1, §15).
+- [x] Pause autosaves before opening the shared menu; exit-tree saving covers
+      pause → title, and a two-process fixture verifies window-close saving.
 - [ ] `GameSaves` backups copy `save_files` bytes into one `ConfigFile`. Check
       that a ~2 MB world backs up and restores correctly, on web too (§15).
 - [ ] A `uses_shell_round_rules = false` round with no timer must last an hour
       with no shell timeout or visible timer (§15).
-- [ ] Gamepad buttons and the mouse are polled in `gameplay.gd`, so they are
-      not rebindable in Settings. Accept that, or raise it as framework data.
+- [x] Keyboard/mouse first for this spike: keys are rebindable, mouse controls
+      fixed. Gamepad/touch gameplay adapters remain Milestone 3.
 - [ ] Store slots are per game, not per seat, so in v1 one outfit dresses every
       pup in the pack (§12.3). Per-seat outfits would be a framework question.
 
@@ -74,43 +79,46 @@ As soon as `game.gd` exists, `GameCatalog` loads it and every framework suite
 sweeps it. Start with a stub that passes them, and keep them green from here on.
 
 - [ ] Commit `DESIGN.md` and this `TODO.md` to the game repository.
-- [ ] A folder `AGENTS.md` with game-specific agent notes, as Chicken Pit has.
-- [ ] `puppy_kraft_options.gd` — constants-only: `GAME_ID`, tunable keys (§13),
+- [x] A folder `AGENTS.md` with game-specific agent notes, as Chicken Pit has.
+- [x] `puppy_kraft_options.gd` — constants-only: `GAME_ID`, tunable keys (§13),
       binding keys (§4.2, §13), with empty `BREEDS`, store, gallery and
       Adventure points table for now.
-- [ ] `game.gd` — minimal manifest (§14.4): id, title, tagline,
+- [x] `game.gd` — minimal manifest (§14.4): id, title, tagline,
       `menu_order = 13`, `CONTROL_STYLE_CUSTOM_KEYS`,
       `uses_shell_round_rules = false`, `supports_cpu_opponent = false`,
       tunables, bindings. Leave multiplayer off until Milestone 10.
-- [ ] `gameplay.tscn` (inherits `game_shell.tscn`) + `gameplay.gd` (`extends
+- [x] `gameplay.tscn` (inherits `game_shell.tscn`) + `gameplay.gd` (`extends
       GameShell`, `game_id()`, `super(value)` in the reduced-motion and
       intense-effects overrides).
-- [ ] A `tests/` folder and a smoke test that loads the manifest by path.
-- [ ] `godot --headless --path . --import`
-- [ ] **Exit:** all 15 framework suites exit 0 with `--game=all`, and
-      `godot --path . -- --game=puppy_kraft` opens the stub.
+- [x] A `tests/` folder and a smoke test that loads the manifest by path.
+- [x] `godot --headless --path . --import`
+- [x] A real, game-owned walkthrough and poster for the shared Instructions
+      screen, recorded through the shared capture scene and validated driver.
+- [x] **Exit:** all 15 framework suites exit 0 with `--game=all`; the game
+      opens under the real shared shell rather than a standalone stub.
 
 ## Milestone 1 — Block world spike (§3.1, §4.1, §11.1, §17) ⚠ riskiest
 
-- [ ] `sim/blocks.gd` — registry with hardness, drops, light, flags, warmth,
+- [x] `sim/blocks.gd` — registry with hardness, drops, light, flags, warmth,
       scent; a dozen meadow and cavern blocks.
-- [ ] `sim/chunk.gd` — 32 × 32 × two layers in packed arrays, dirty flags.
-- [ ] `sim/world_grid.gd` — chunk map, get/set by cell, edits.
-- [ ] A meadow-only generator: surface curve, soil and stone layers, simple
+- [x] `sim/chunk.gd` — 32 × 32 × two layers in packed arrays, dirty flags.
+- [x] `sim/world_grid.gd` — chunk map, get/set by cell, edits.
+- [x] A meadow-only generator: surface curve, soil and stone layers, simple
       caves.
-- [ ] `sim/puppy_body.gd` (`RefCounted`, 60 Hz, every constant at the top):
-  - [ ] Box movement, run, jump with coyote time and a jump buffer
-  - [ ] One-cell tunnels fit; no fall damage
-  - [ ] Climbing on ladders, vines and roots
-- [ ] Dig (hold, crack steps, hardness times) and place (support rules) on
+- [x] `sim/puppy_body.gd` (`RefCounted`, 60 Hz, every constant at the top):
+  - [x] Box movement, run, jump with coyote time and a jump buffer
+  - [x] One-cell tunnels fit; no fall damage
+  - [x] Climbing on ladders and roots through the generic climbable flag;
+        vines can use that flag when added in later biomes
+- [x] Dig (hold, crack steps, hardness times) and place (support rules) on
       the directional target cell; mouse aim within 3 cells.
-- [ ] `world/mesh_builder.gd` — copy from `cube_trials/world/` and adapt.
-- [ ] `world/chunk_mesher.gd` — exposed faces only, back wall tiles, vertex
+- [x] `world/mesh_builder.gd` — copy from `cube_trials/world/` and adapt.
+- [x] `world/chunk_mesher.gd` — exposed faces only, back wall tiles, vertex
       colours, one shared material.
-- [ ] `world/world_view.gd` — isolated `SubViewport`, narrow-FOV side camera,
+- [x] `world/world_view.gd` — isolated `SubViewport`, narrow-FOV side camera,
       look-ahead.
-- [ ] A grey-box puppy (a box with ears is fine).
-- [ ] `tests/blocks_test.gd`, `tests/puppy_body_test.gd`.
+- [x] A grey-box puppy (a box with ears is fine).
+- [x] `tests/blocks_test.gd`, `tests/puppy_body_test.gd`.
 - [ ] **Exit:** a profile on web and desktop. Record here: chunk remesh time
       (target < 2 ms), draw calls in a surface shot (target < 100), frame time
       on a mid laptop on web (target 60 fps) and on a mid phone (30 fps floor).
@@ -118,28 +126,51 @@ sweeps it. Start with a stub that passes them, and keep them green from here on.
       size, world size and loaded radius (§17) from these numbers before
       moving on.
 
+**Desktop smoke profile:** Godot 4.7.2, Windows, OpenGL 3.3 Compatibility,
+RTX 4090 / NVIDIA 610.88. At 1280 × 720, 540 × 960 and 2560 × 1080:
+35 mesh chunks, two remeshes maximum per frame, 0.559 ms mean / 1.143 ms maximum
+warmed chunk remesh, and 6 / 6 / 7 world draw calls. The windowed suite checks
+actual pup/terrain pixels, projection, queue limits and the <2 ms / <100 budgets.
+This high-end desktop is not a mid-laptop/web/phone profile. Those hardware
+gates and three-person feel checks remain unverified, so the exit stays open.
+
 ## Milestone 2 — Seeds and saves (§3.2, §3.8)
 
-- [ ] `sim/seed_words.gd` — 1024-word list, words ↔ 64-bit seed, any string
+- [x] `sim/seed_words.gd` — 1024 friendly compound words (32 prefixes × 32
+      nouns), words ↔ signed 64-bit seed, any string
       hashed; no duplicates, nothing rude.
 - [ ] `sim/world_gen/layout.gd` — the eager pass: biome bands, height control
-      points, structure sites.
-- [ ] Lazy chunk fill that depends only on the seed, the layout and the
+      points, structure sites. The PK1 meadow band and kennel/shrine site
+      metadata exist; height control points and later-biome layouts are pending.
+- [x] Lazy chunk fill that depends only on the seed, the layout and the
       chunk's coordinates.
-- [ ] `sim/world_gen/world_generator.gd` — versioned (`PK1`); old versions
+- [x] `sim/world_gen/world_generator.gd` — versioned (`PK1`); old versions
       kept forever.
-- [ ] `sim/world_save.gd` — header, pup state, world state, RLE + compressed
+- [x] `sim/world_save.gd` — header, pup state, world state, RLE + compressed
       chunk deltas, atomic tmp-and-rename writes.
-- [ ] Autosave at dawn, after a retreat, at Call it a day, on pause → quit
-      and on window close.
-- [ ] `ui/den_door.tscn` — three slots with summaries, new world (seed words,
+- [x] Autosave at dawn, Call it a day, pause, exit-tree and window close.
+- [ ] Autosave after retreat, when the retreat system exists.
+- [x] `ui/den_door.tscn` — three slots with summaries, new world (seed words,
       random or typed), delete with confirmation.
-- [ ] Declare the three world files and the Pupedia in `save_files`.
-- [ ] `tests/seed_words_test.gd`, `tests/world_save_test.gd`, first pass of
+- [x] Declare the three world files in `save_files`.
+- [ ] Declare/create the Pupedia when its collection log exists.
+- [x] `tests/seed_words_test.gd`, `tests/world_save_test.gd`, first pass of
       `tests/world_gen_test.gd` (determinism, fill order, generator versions).
 - [ ] **Exit:** make a world, dig a tunnel, quit, reopen: the tunnel is there,
       and the file is a few KB. The same seed words on another machine give
       the same world.
+
+**Verified locally:** a fresh save is 545 bytes; the edited round-trip fixture
+is 1117 bytes. A real scene creates a named world, digs, saves at dawn/pause/exit,
+reloads the tunnel and unfinished outing (including the fixed-step remainder),
+then closes it at the bed and keeps going without regeneration. Window-close
+saving is verified by a second process. Corrupt/newer formats, unsupported
+generators and malformed deltas are rejected explicitly. Failed replacements
+keep the prior file; orphaned temporary files are ignored. Unknown additive
+sections/keys and unpaid points survive saving.
+Generation is fill-order independent over 50 seeds, with a golden PK1 fingerprint.
+Cross-machine confirmation, heavily built <2 MB saves and web backup/restore
+profiling remain open; no rewards or Pupedia are claimed.
 
 ## Milestone 3 — The pup (§3.6–§3.7, §4, §5.1–§5.2)
 

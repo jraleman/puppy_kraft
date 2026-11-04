@@ -22,6 +22,14 @@
 | Look-and-feel reference | `games/cube_trials/`, `games/chicken_pit/`, `games/creep_code/` (toy-like 3D in a `SubViewport` under the 2D shell) |
 | Renderer | `gl_compatibility` — unchanged |
 
+**Current implementation scope.** The owner chose Phase 0 plus Milestones 1-2:
+a playable, saved meadow spike, keyboard and mouse first. Players name their
+pup at world creation; blank means **Pup**. The implementation includes movement,
+digging/placement, PK1 seeds, three world slots, autosaving, a building HUD and
+a procedural 3D view. It does not yet implement the full adventure, Pad/Touch,
+Pupedia, progression or reward payouts. See `TODO.md` for verified checks and
+still-open hardware/playtest gates.
+
 ---
 
 ## 1. Concept
@@ -330,9 +338,10 @@ seeded from the world seed and the day number, so it is deterministic.
 - The **Pupedia** (§10.5) is global across worlds, in
   `user://puppy_kraft_pupedia.cfg`.
 
-**Seed words.** A seed is shown and typed as three friendly words plus a
-number, such as `MUDDY-BISCUIT-SQUIRREL-42`, from a fixed list of 1024 words
-*(tune)*. Words map to a 64-bit integer. Any typed string is also accepted
+**Seed words.** A seed is shown and typed as three friendly compound words plus a
+number, such as `SUNNYBISCUIT-GENTLECLOVER-MUDDYBUNNY-42`, from a fixed list of 1024
+words (32 prefixes × 32 nouns in PK1). Preserve the word ordering once saves
+exist. Words map to a signed 64-bit integer. Any typed string is also accepted
 and hashed, so "my dog's birthday" is a valid seed. The share card (§12.4)
 prints the seed words and the generator version (`PK1`), so a friend can
 make the same world.
@@ -1500,9 +1509,9 @@ mod-friendly structure templates; Spanish localisation.
    are `puppy_kraft`). "Kraft" is a food company's trademark and "-craft"
    names evoke Minecraft. Clear the name before it fixes
    `custom_user_dir_name` forever.
-2. **The pup's name.** A default hero name, a name the player types at world
-   creation, or no name at all ("the pup")?
-3. **Overlap with Dulce's Adventure.** It is also a side-on game about a small
+2. **The pup's name (resolved).** The player types a name at world creation;
+   blank means **Pup**. Use that name in the Den Door, HUD and diary.
+3. **Overlap with Dolce's Adventure.** It is also a side-on game about a small
    dog in this collection. Is a second dog side-on game fine, and should the
    art keep them clearly apart?
 4. **The v1 boss.** The Mailman King (the funniest, and the start biome) is

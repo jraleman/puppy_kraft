@@ -1,0 +1,122 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://games/puppy_kraft/ui/den_door.gd" id="1_door"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_door"]
+bg_color = Color(0.055, 0.09, 0.105, 0.97)
+content_margin_left = 28.0
+content_margin_top = 22.0
+content_margin_right = 28.0
+content_margin_bottom = 22.0
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_left = 12
+corner_radius_bottom_right = 12
+
+[node name="DenDoor" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_door")
+
+[node name="Shade" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.04, 0.07, 0.08, 0.8)
+
+[node name="Margins" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 48.0
+offset_top = 172.0
+offset_right = -48.0
+offset_bottom = -60.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="Margins"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBox_door")
+
+[node name="Scroll" type="ScrollContainer" parent="Margins/Panel"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="Layout" type="VBoxContainer" parent="Margins/Panel/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 18
+
+[node name="Title" type="Label" parent="Margins/Panel/Scroll/Layout"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 38
+text = "THE DEN DOOR"
+
+[node name="Description" type="Label" parent="Margins/Panel/Scroll/Layout"]
+layout_mode = 2
+text = "A saved meadow, a building bag and one brave little pup. This is the grey-box world spike."
+autowrap_mode = 3
+
+[node name="Slots" type="VBoxContainer" parent="Margins/Panel/Scroll/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="NewWorldForm" type="VBoxContainer" parent="Margins/Panel/Scroll/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="FormTitle" type="Label" parent="Margins/Panel/Scroll/Layout/NewWorldForm"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "NEW WORLD"
+
+[node name="PupCaption" type="Label" parent="Margins/Panel/Scroll/Layout/NewWorldForm"]
+layout_mode = 2
+text = "Pup's name (optional; blank means Pup)"
+
+[node name="PupName" type="LineEdit" parent="Margins/Panel/Scroll/Layout/NewWorldForm"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "Pup"
+max_length = 32
+caret_blink = false
+
+[node name="SeedCaption" type="Label" parent="Margins/Panel/Scroll/Layout/NewWorldForm"]
+layout_mode = 2
+text = "Seed words or any text (blank makes a random world)"
+
+[node name="SeedText" type="LineEdit" parent="Margins/Panel/Scroll/Layout/NewWorldForm"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "muddy biscuit meadow"
+max_length = 160
+caret_blink = false
+
+[node name="CreateWorld" type="Button" parent="Margins/Panel/Scroll/Layout/NewWorldForm"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Make a world"
+
+[node name="DoorStatus" type="Label" parent="Margins/Panel/Scroll/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Worlds save locally."
+autowrap_mode = 3
+
+[node name="DeleteWorldDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "Delete world?"
+ok_button_text = "Delete world"
