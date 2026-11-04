@@ -1,6 +1,6 @@
 extends RefCounted
 
-## Only this adapter polls keys; held buttons produce one edge after release.
+## Polls held actions and retains ordered bark edges between sampled render frames.
 
 const Options = preload("res://games/puppy_kraft/puppy_kraft_options.gd")
 const Frame = preload("res://games/puppy_kraft/sim/input_frame.gd")
@@ -8,6 +8,9 @@ const Frame = preload("res://games/puppy_kraft/sim/input_frame.gd")
 var _jump_down := false
 var _dig_down := false
 var _place_down := false
+var _sniff_down := false
+var _bark_down := false
+var _bark_edges: Array[bool] = []
 var _previous_down := false
 var _next_down := false
 
@@ -23,12 +26,22 @@ func sample(mouse_cell: Vector2i, mouse_aim: bool, mouse_dig: bool,
 	var jump := Input.is_action_pressed(Options.JUMP)
 	var dig := Input.is_action_pressed(Options.DIG) or mouse_dig
 	var place := Input.is_action_pressed(Options.PLACE) or mouse_place
+	var sniff := Input.is_action_pressed(Options.SNIFF)
+	var bark := Input.is_action_pressed(Options.BARK)
+	if bark != _bark_down:
+		_bark_edges.append(bark)
+		_bark_down = bark
 	var previous := Input.is_action_pressed(Options.WHEEL_PREV)
 	var next := Input.is_action_pressed(Options.WHEEL_NEXT)
 	frame.jump_pressed = jump and not _jump_down
 	frame.dig = dig
 	frame.dig_pressed = dig and not _dig_down
 	frame.place_pressed = place and not _place_down
+	frame.sniff = sniff
+	frame.sniff_pressed = sniff and not _sniff_down
+	frame.bark = bark
+	frame.bark_edges.assign(_bark_edges)
+	_bark_edges.clear()
 	frame.back_wall = Input.is_action_pressed(Options.BACK_WALL)
 	frame.wheel_delta = wheel + int(next and not _next_down) - int(previous and not _previous_down)
 	frame.mouse_aim = mouse_aim
@@ -36,6 +49,7 @@ func sample(mouse_cell: Vector2i, mouse_aim: bool, mouse_dig: bool,
 	_jump_down = jump
 	_dig_down = dig
 	_place_down = place
+	_sniff_down = sniff
 	_previous_down = previous
 	_next_down = next
 	return frame
@@ -45,5 +59,21 @@ func reset() -> void:
 	_jump_down = Input.is_action_pressed(Options.JUMP)
 	_dig_down = Input.is_action_pressed(Options.DIG)
 	_place_down = Input.is_action_pressed(Options.PLACE)
+	_sniff_down = Input.is_action_pressed(Options.SNIFF)
+	_bark_down = Input.is_action_pressed(Options.BARK)
+	_bark_edges.clear()
 	_previous_down = Input.is_action_pressed(Options.WHEEL_PREV)
 	_next_down = Input.is_action_pressed(Options.WHEEL_NEXT)
+
+
+func handle_event(event: InputEvent) -> void:
+	if event is InputEventKey and event.echo:
+		return
+	if event.is_action_pressed(Options.BARK):
+		if not _bark_down:
+			_bark_edges.append(true)
+		_bark_down = true
+	elif event.is_action_released(Options.BARK):
+		if _bark_down:
+			_bark_edges.append(false)
+		_bark_down = false

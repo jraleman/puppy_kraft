@@ -9,6 +9,9 @@ const Blocks = preload("res://games/puppy_kraft/sim/blocks.gd")
 const Builder = preload("res://games/puppy_kraft/world/mesh_builder.gd")
 const Mesher = preload("res://games/puppy_kraft/world/chunk_mesher.gd")
 const Puppy = preload("res://games/puppy_kraft/world/puppy_rig.gd")
+const Trails = preload("res://games/puppy_kraft/world/scent_trails.gd")
+const BarkRings = preload("res://games/puppy_kraft/world/bark_rings.gd")
+const SNIFF_SHADER = preload("res://games/puppy_kraft/world/sniff_vision.gdshader")
 const LOAD_RADIUS := Vector2i(3, 2)
 const REMESHES_PER_FRAME := 2
 const CAMERA_FOV := 28.0
@@ -20,12 +23,15 @@ var zoom := 1.0
 var world_viewport: SubViewport
 var camera: Camera3D
 var puppy: Puppy
+var scent_trails: Trails
+var bark_rings: BarkRings
 var _container: SubViewportContainer
 var _stage: Node3D
 var _material: StandardMaterial3D
 var _target: MeshInstance3D
 var _cracks: MeshInstance3D
 var _marker_material: StandardMaterial3D
+var _vision_material: ShaderMaterial
 var _world: World
 var _meshes: Dictionary[Vector2i, MeshInstance3D] = {}
 var _pending: Array[Vector2i] = []
@@ -47,6 +53,9 @@ func _ready() -> void:
 	_container.name = "WorldContainer"
 	_container.stretch = true
 	_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vision_material = ShaderMaterial.new()
+	_vision_material.shader = SNIFF_SHADER
+	_container.material = _vision_material
 	add_child(_container)
 	_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	world_viewport = SubViewport.new()
@@ -89,6 +98,16 @@ func _ready() -> void:
 	puppy = Puppy.new()
 	_stage.add_child(puppy)
 	_build_marker()
+	scent_trails = Trails.new()
+	scent_trails.name = "ScentTrails"
+	add_child(scent_trails)
+	scent_trails.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scent_trails.hide()
+	bark_rings = BarkRings.new()
+	bark_rings.name = "BarkRings"
+	add_child(bark_rings)
+	bark_rings.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bark_rings.hide()
 	resized.connect(_resize_viewport)
 	_resize_viewport()
 
@@ -112,7 +131,14 @@ func present(world: World, delta: float = 0.0) -> void:
 		_world = world
 		_camera_ready = false
 		_crack_step = -1
+		if bark_rings != null:
+			bark_rings.clear()
 	if world == null or camera == null:
+		if scent_trails != null:
+			scent_trails.hide()
+			_vision_material.set_shader_parameter("scent_amount", 0.0)
+		if bark_rings != null:
+			bark_rings.clear()
 		return
 	puppy.reduced_motion = reduced_motion
 	puppy.present(world.body, delta)
@@ -129,6 +155,17 @@ func present(world: World, delta: float = 0.0) -> void:
 	camera.position = focus + Vector3(0, distance * 0.12, distance)
 	camera.look_at(focus)
 	_update_marker(world)
+	_vision_material.set_shader_parameter("scent_amount", 0.82 if world.sniffing else 0.0)
+	scent_trails.present(world, screen_position, delta, reduced_motion, intense_effects)
+	bark_rings.present(world, screen_position, reduced_motion, intense_effects)
+
+
+func show_bark(event: Dictionary) -> void:
+	bark_rings.add_bark(event)
+
+
+func clear_barks() -> void:
+	bark_rings.clear()
 
 
 func screen_to_cell(local: Vector2) -> Vector2i:
@@ -238,7 +275,7 @@ func _build_marker() -> void:
 
 
 func _update_marker(world: World) -> void:
-	_target.visible = world.grid.contains(world.target_cell)
+	_target.visible = not world.sniffing and world.grid.contains(world.target_cell)
 	_target.position = Mesher.cell_centre(world.target_cell)
 	_marker_material.albedo_color = Color("fff4bd") if world.target_in_reach else Color("e69b8a")
 	_cracks.position = _target.position

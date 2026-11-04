@@ -16,6 +16,15 @@ This is a Godot 4.7 game folder, hosted two directories above in
   plain frames; the 3D view never supplies collision or gameplay decisions.
 - Generation depends only on the seed, version and cell coordinates. Preserve
   `PK1` forever when adding later generators.
+- Scent indexes use chunk revisions, not mesh dirtiness that remeshing clears.
+  Edit terrain through `world_grid.set_block`. Sniff input/state is transient;
+  menus cancel it and saves do not latch it.
+- Bark frames carry ordered press/release edges, buffered across sub-tick
+  render frames. Reset both adapter and model queues around menus/rebinding.
+  Charge/tap state is transient; energy, rest delay and Ruff cooldown are not.
+- `sim/needs.gd` implements only the bark budget. Missing optional energy/rest/
+  cooldown save fields get legacy defaults; present malformed values fail.
+  Do not advertise the remaining survival needs or future bark interactions.
 - Save only edits against generated terrain. Reject unreadable or newer saves
   explicitly, never replace them with a fresh world. Write a temporary file,
   then rename over the slot; ignore unfinished temporary files when loading.
@@ -34,6 +43,9 @@ godot --path ..\.. -- --game=puppy_kraft
 godot --headless --path ..\.. --script res://games/puppy_kraft/tests/blocks_test.gd -- --game=all
 godot --headless --path ..\.. --script res://games/puppy_kraft/tests/puppy_body_test.gd -- --game=all
 godot --headless --path ..\.. --script res://games/puppy_kraft/tests/abilities_test.gd -- --game=all
+godot --headless --path ..\.. --script res://games/puppy_kraft/tests/needs_test.gd -- --game=all
+godot --headless --path ..\.. --script res://games/puppy_kraft/tests/audio_test.gd -- --game=all
+godot --headless --path ..\.. --script res://games/puppy_kraft/tests/scent_test.gd -- --game=all
 godot --headless --path ..\.. --script res://games/puppy_kraft/tests/seed_words_test.gd -- --game=all
 godot --headless --path ..\.. --script res://games/puppy_kraft/tests/world_gen_test.gd -- --game=all
 godot --headless --path ..\.. --script res://games/puppy_kraft/tests/world_save_test.gd -- --game=all
@@ -50,7 +62,9 @@ There is no separate linter or formatter.
 The shared Instructions screen requires a real clip and poster. This game's
 `tools/tutorial_driver.gd` records registered inputs through
 `res://tools/tutorial_capture.tscn` and validates jumping, climbing, digging both
-layers, placement and a saved diary. Never assign poses or edits to fake a take.
+layers, placement, real sniff trails, all three barks, energy recovery and a
+saved diary. Its recorder-only `_set_capture_inset` keeps the real HUD above
+the caption card. Never assign poses or edits to fake a take.
 Use the shared capture scene directly: the host PowerShell recorder's fixed
 game list does not yet include this prototype. Re-record only when the visuals
 or captions change.

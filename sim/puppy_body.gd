@@ -34,14 +34,16 @@ func bounds() -> Rect2:
 	return Rect2(position - SIZE * 0.5, SIZE)
 
 
-func step(grid: Grid, frame: Frame) -> void:
+func step(grid: Grid, frame: Frame, walk_scale: float = 1.0) -> void:
 	assert(is_finite(frame.move), "Puppy movement must be finite.")
+	assert(is_finite(walk_scale) and walk_scale > 0.0, "Walking scale must be positive.")
 	grounded = grid.overlaps_solid(Rect2(bounds().position + Vector2(0, 0.02), SIZE))
 	coyote_ticks = COYOTE_TICKS if grounded else maxi(coyote_ticks - 1, 0)
 	jump_buffer_ticks = JUMP_BUFFER_TICKS if frame.jump_pressed \
 		else maxi(jump_buffer_ticks - 1, 0)
 	var movement := clampf(frame.move, -1.0, 1.0)
-	velocity.x = move_toward(velocity.x, movement * RUN_SPEED, ACCELERATION * STEP)
+	velocity.x = move_toward(velocity.x, movement * RUN_SPEED * walk_scale,
+		ACCELERATION * STEP)
 	if movement != 0.0:
 		facing = 1 if movement > 0.0 else -1
 	climbing = _touches_climbable(grid) and frame.aim.y != 0

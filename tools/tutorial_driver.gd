@@ -20,12 +20,17 @@ const STEPS: Array[Dictionary] = [
 		"body": "Hold Shift while digging or placing to work behind the front blocks. Back walls never stop your puppy."},
 	{"time": 15.0, "title": "Build with your material bag",
 		"body": "Q and R cycle materials; K places one block. Most blocks need support, and you cannot build through the pup."},
-	{"time": 20.0, "title": "Save, then return to your bed",
+	{"time": 18.2, "title": "Follow your nose",
+		"body": "Hold L to sniff through walls: zigzags lead to crystal or glow moss, pawprints lead home. Read the strongest-scent caption. Toggle is available in Settings."},
+	{"time": 20.4, "title": "Yip, Woof, Ruff!",
+		"body": "Hold I and release at the numbered pips. Woof costs 3 energy, Ruff costs 8. Strong barks shake leaves; standing still restores energy. Tap to cycle is in Settings."},
+	{"time": 29.0, "title": "Save, then return to your bed",
 		"body": "Save world keeps your edits. Call it a day opens the saved diary; Keep going returns without regenerating terrain."},
 ]
 const ACTIONS: Array[StringName] = [
 	Options.LEFT, Options.RIGHT, Options.UP, Options.DOWN, Options.JUMP,
 	Options.DIG, Options.PLACE, Options.BACK_WALL, Options.WHEEL_PREV, Options.WHEEL_NEXT,
+	Options.SNIFF, Options.BARK,
 ]
 
 var _done: Dictionary[String, bool] = {}
@@ -42,11 +47,14 @@ func steps() -> Array[Dictionary]:
 
 
 func duration() -> float:
-	return 25.0
+	return 34.0
 
 
 func settings_overrides() -> Dictionary:
-	return {Options.CAMERA_ZOOM_KEY: 1.0}
+	return {
+		Options.CAMERA_ZOOM_KEY: 1.0, Options.SNIFF_MODE_KEY: Options.SNIFF_HOLD,
+		Options.BARK_CHARGE_KEY: Options.BARK_HOLD,
+	}
 
 
 func configure_session(session: Node) -> void:
@@ -84,12 +92,20 @@ func update(scene: Node, time: float, _delta: float) -> void:
 		or world.grid.get_block(wall, Chunk.FRONT) == Blocks.AIR
 	_done["back_dug"] = _done.get("back_dug", false) \
 		or world.grid.get_block(wall, Chunk.BACK) == Blocks.AIR
+	_done["sniffed"] = _done.get("sniffed", false) \
+		or (world.sniffing and not world.scent.trails.is_empty())
+	for level in range(1, 4):
+		var milestone := "bark_%d" % level
+		_done[milestone] = _done.get(milestone, false) or world.abilities.last_level == level
+	_done["energy_recovered"] = _done.get("energy_recovered", false) \
+		or (time >= 25.0 and time < 26.4 and world.needs.energy > 89.1
+			and world.needs.energy < 100.0)
 	var direction := 0.0
 	if time >= 3.0 and time < 5.0:
 		direction = float(layout.spawn_column) + 8.5 - world.body.position.x
 	elif time >= 7.2 and time < 10.5:
 		direction = -1.0
-	elif time >= 19.0 and time < 20.4:
+	elif time >= 26.4 and time < 28.8:
 		direction = float(layout.bed_cell.x) + 0.5 - world.body.position.x
 	# A physical cursor hovering over the window must not change the keyboard lesson.
 	scene.set("_mouse_aim", false)
@@ -105,11 +121,14 @@ func update(scene: Node, time: float, _delta: float) -> void:
 		or (time >= 16.0 and time < 16.6), "Shift")
 	_hold(Options.PLACE, (time >= 16.0 and time < 16.2)
 		or (time >= 17.0 and time < 17.2), "K")
-	if _once("save", time >= 20.5):
+	_hold(Options.SNIFF, time >= 18.2 and time < 20.2, "L")
+	_hold(Options.BARK, (time >= 20.4 and time < 20.5)
+		or (time >= 21.0 and time < 21.6) or (time >= 22.4 and time < 23.8), "I")
+	if _once("save", time >= 29.0):
 		(scene.get("_dock") as Control).emit_signal("save_requested")
-	if _once("nap", time >= 21.0):
+	if _once("nap", time >= 29.7):
 		scene.call("_show_nap")
-	if _once("diary", time >= 22.0):
+	if _once("diary", time >= 30.7):
 		var dialog := scene.get("_nap_dialog") as ConfirmationDialog
 		if not dialog.visible:
 			push_error("The tutorial did not reach the bed for a real nap.")
@@ -125,7 +144,10 @@ func validate_finished(scene: Node) -> bool:
 		push_error("The tutorial never created its world.")
 		return false
 	var complete := not world.outing_open and world.blocks_dug == 2 and world.blocks_placed == 2
-	for milestone: String in ["jumped", "climbed", "front_dug", "back_dug", "save", "diary"]:
+	for milestone: String in [
+		"jumped", "climbed", "front_dug", "back_dug", "sniffed",
+		"bark_1", "bark_2", "bark_3", "energy_recovered", "save", "diary",
+	]:
 		complete = complete and _done.get(milestone, false)
 	var saves := scene.get("_saves") as Saves
 	var loaded := saves.read_slot(1)
@@ -134,7 +156,9 @@ func validate_finished(scene: Node) -> bool:
 		return false
 	var saved := loaded["world"] as World
 	complete = complete and saved.body.position == world.body.position \
-		and not saved.outing_open and saved.blocks_dug == 2 and saved.blocks_placed == 2
+		and not saved.outing_open and saved.blocks_dug == 2 and saved.blocks_placed == 2 \
+		and world.abilities.emitted_total == 3 \
+		and is_equal_approx(saved.needs.energy, world.needs.energy)
 	if not complete:
 		push_error("Puppy tutorial incomplete: dug=%d, placed=%d, at=%s, milestones=%s."
 			% [world.blocks_dug, world.blocks_placed, world.body.position, _done])

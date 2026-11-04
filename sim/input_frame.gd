@@ -8,6 +8,10 @@ var jump_pressed := false
 var dig := false
 var dig_pressed := false
 var place_pressed := false
+var sniff := false
+var sniff_pressed := false
+var bark := false
+var bark_edges: Array[bool] = []
 var back_wall := false
 var wheel_delta := 0
 var mouse_aim := false
@@ -18,4 +22,6 @@ func without_edges() -> void:
 	jump_pressed = false
 	dig_pressed = false
 	place_pressed = false
+	sniff_pressed = false
+	bark_edges.clear()
 	wheel_delta = 0

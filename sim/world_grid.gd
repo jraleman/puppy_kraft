@@ -13,6 +13,7 @@ var generator: Generator
 var chunks: Dictionary[Vector2i, Chunk] = {}
 var edits: Dictionary[Vector2i, Dictionary] = {}
 var dirty_chunks: Dictionary[Vector2i, bool] = {}
+var revision := 0
 var width := Layout.WIDTH
 var height := Layout.HEIGHT
 
@@ -61,6 +62,7 @@ func set_block(cell: Vector2i, id: int, layer := Chunk.FRONT) -> Error:
 	if chunk.get_block(local, layer) == id:
 		return OK
 	chunk.set_block(local, id, layer)
+	revision += 1
 	var index := Chunk.index(local) + layer * Chunk.CELLS
 	if id == generator.block_at(cell, layer):
 		if edits.has(coordinate):

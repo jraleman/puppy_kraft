@@ -18,6 +18,9 @@ func _initialize() -> void:
 	_directory = "user://puppy_kraft_save_test_%d" % OS.get_process_id()
 	_saves = Saves.new(_directory)
 	_test_round_trip()
+	_test_transient_sniff_state()
+	_test_bark_state_and_legacy()
+	_test_rejected_bark_state()
 	_test_atomic_write()
 	_test_rejected_versions_and_corruption()
 	_cleanup()
@@ -108,6 +111,24 @@ func _test_atomic_write() -> void:
 	assert(DirAccess.remove_absolute(temporary) == OK)
 
 
+func _test_transient_sniff_state() -> void:
+	var result := _saves.read_slot(1)
+	assert(int(result["error"]) == OK)
+	var world: World = result["world"]
+	world.set_sniff_mode(true)
+	var frame := Frame.new()
+	frame.sniff_pressed = true
+	world.advance(Body.STEP, frame)
+	_expect(world.sniffing, "The persistence fixture must save a genuinely active sniff toggle.")
+	_expect(int(_saves.write_slot(1, world)["error"]) == OK,
+		"Sniffing must not prevent ordinary world autosaving.")
+	result = _saves.read_slot(1)
+	_expect(int(result["error"]) == OK and not (result["world"] as World).sniffing
+		and (result["world"] as World).grid.edits == world.grid.edits
+		and (result["world"] as World).inventory == world.inventory,
+		"Loading old-format worlds must preserve terrain and materials without latching sniff input.")
+
+
 func _test_rejected_versions_and_corruption() -> void:
 	var config := ConfigFile.new()
 	assert(config.load(_saves.slot_path(1)) == OK)
@@ -148,6 +169,81 @@ func _test_rejected_versions_and_corruption() -> void:
 	result = _saves.read_slot(2)
 	_expect(int(result["error"]) != OK and str(result["message"]).contains("run"),
 		"A well-compressed but out-of-bounds run must not edit arbitrary cells.")
+
+
+func _test_bark_state_and_legacy() -> void:
+	var original := _saves.read_slot(1)
+	assert(int(original["error"]) == OK)
+	var world: World = original["world"]
+	world.needs.energy = 18.5
+	world.needs.rest_ticks = 59
+	world.abilities.cooldown_ticks = 37
+	assert(int(_saves.write_slot(3, world)["error"]) == OK)
+	var result := _saves.read_slot(3)
+	_expect(int(result["error"]) == OK, "A world with basic bark state must load.")
+	if int(result["error"]) != OK:
+		return
+	var loaded: World = result["world"]
+	_expect(loaded.needs.energy == 18.5 and loaded.needs.rest_ticks == 59
+		and loaded.abilities.cooldown_ticks == 37,
+		"Energy, partial rest delay and the remaining Ruff cooldown must round-trip exactly.")
+	world.advance(Body.STEP, Frame.new())
+	loaded.advance(Body.STEP, Frame.new())
+	_expect(world.needs.energy == loaded.needs.energy
+		and world.needs.rest_ticks == loaded.needs.rest_ticks
+		and world.abilities.cooldown_ticks == loaded.abilities.cooldown_ticks,
+		"Reloading must not restart rest recovery or bypass a running bark cooldown.")
+	world.abilities.cooldown_ticks = 0
+	var frame := Frame.new()
+	frame.bark = true
+	frame.bark_edges.append(true)
+	world.advance(Body.STEP * 31.0, frame)
+	_expect(world.abilities.charge_level == 2,
+		"The save fixture must use a real live Woof charge rather than assigned input state.")
+	assert(int(_saves.write_slot(3, world)["error"]) == OK)
+	result = _saves.read_slot(3)
+	assert(int(result["error"]) == OK)
+	loaded = result["world"]
+	loaded.advance(Body.STEP * 90.0, Frame.new())
+	_expect(loaded.abilities.charge_level == 0 and loaded.abilities.emitted_total == 0,
+		"Loading during a charge must not persist held input or emit an unrequested bark.")
+	var config := ConfigFile.new()
+	assert(config.load(_saves.slot_path(1)) == OK)
+	for key in ["energy", "energy_rest_ticks", "bark_cooldown_ticks"]:
+		config.erase_section_key("pup", key)
+	assert(config.save(_saves.slot_path(3)) == OK)
+	result = _saves.read_slot(3)
+	_expect(int(result["error"]) == OK, "Pre-bark format-1 worlds must remain readable.")
+	if int(result["error"]) != OK:
+		return
+	loaded = result["world"]
+	_expect(loaded.needs.energy == 100.0 and loaded.needs.rest_ticks == 0
+		and loaded.abilities.cooldown_ticks == 0 and loaded.grid.edits == world.grid.edits
+		and loaded.points_pending == world.points_pending,
+		"Missing additive fields must receive explicit legacy defaults without losing world state.")
+	assert(int(_saves.write_slot(3, loaded)["error"]) == OK)
+	assert(config.load(_saves.slot_path(3)) == OK)
+	_expect(config.get_value("pup", "energy") == 100.0
+		and config.get_value("future_neighbours", "friendship") == {"rabbit": 2},
+		"A legacy world's next autosave must add bark state and retain unknown additive fields.")
+
+
+func _test_rejected_bark_state() -> void:
+	for example: Array in [
+		["energy", -1.0], ["energy", 100.1], ["energy", INF], ["energy", "full"],
+		["energy_rest_ticks", 61], ["energy_rest_ticks", 1.5],
+		["bark_cooldown_ticks", -1], ["bark_cooldown_ticks", 61],
+		["bark_cooldown_ticks", true],
+	]:
+		var config := ConfigFile.new()
+		assert(config.load(_saves.slot_path(1)) == OK)
+		config.set_value("pup", str(example[0]), example[1])
+		assert(config.save(_saves.slot_path(3)) == OK)
+		var before := FileAccess.get_file_as_bytes(_saves.slot_path(3))
+		var result := _saves.read_slot(3)
+		_expect(int(result["error"]) != OK and not result.has("world")
+			and FileAccess.get_file_as_bytes(_saves.slot_path(3)) == before,
+			"Malformed %s must fail explicitly without replacing the saved world." % str(example[0]))
 
 
 func _cleanup() -> void:

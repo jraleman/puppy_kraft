@@ -12,6 +12,7 @@ const View = preload("res://games/puppy_kraft/world/world_view.gd")
 const BuildingHud = preload("res://games/puppy_kraft/ui/pk_hud.gd")
 const Door = preload("res://games/puppy_kraft/ui/den_door.gd")
 const DOOR_SCENE = preload("res://games/puppy_kraft/ui/den_door.tscn")
+const BarkAudio = preload("res://games/puppy_kraft/audio/bark_audio.gd")
 const DOCK_HEIGHT := 146.0
 
 var save_directory := "user://"
@@ -34,6 +35,7 @@ var _day_finished := false
 var _quit_without_save := false
 var _old_auto_accept_quit := true
 var _last_save_ok := true
+var _capture_inset := 0.0
 
 
 func game_id() -> String:
@@ -54,6 +56,11 @@ func _prepare_session() -> void:
 
 func _load_round_settings() -> void:
 	super()
+	if _world != null:
+		_world.set_sniff_mode(Settings.tunable_choice(Options.SNIFF_MODE_KEY)
+			== Options.SNIFF_TOGGLE)
+		_world.set_bark_mode(Settings.tunable_choice(Options.BARK_CHARGE_KEY)
+			== Options.BARK_TAP)
 	if _view != null:
 		_view.zoom = float(Settings.tunable(Options.CAMERA_ZOOM_KEY))
 		if _world != null:
@@ -114,6 +121,10 @@ func _reset_round_state() -> void:
 		_dock.hide()
 		return
 	_world.begin_outing()
+	_world.set_sniff_mode(Settings.tunable_choice(Options.SNIFF_MODE_KEY)
+		== Options.SNIFF_TOGGLE)
+	_world.set_bark_mode(Settings.tunable_choice(Options.BARK_CHARGE_KEY)
+		== Options.BARK_TAP)
 	_door.hide()
 	_dock.show()
 	_view.present(_world)
@@ -174,20 +185,27 @@ func _update_round(delta: float, _time_left: float) -> void:
 		_mouse_dig and mouse_inside, _mouse_place and mouse_inside, _wheel)
 	_wheel = 0
 	_world.advance(delta, _frame)
+	var nap_requested := false
 	for event: Dictionary in _world.take_events():
 		match str(event["type"]):
 			"dawn":
 				_save_world("Dawn autosave / Day %d." % _world.day_number())
 			"nap_requested":
-				_show_nap()
+				nap_requested = true
+			"barked":
+				_view.show_bark(event)
+				AudioManager.play_sfx(BarkAudio.bark(int(event["level"])), -8.0)
 			"error":
 				push_error(str(event["message"]))
+	if nap_requested:
+		_show_nap()
 	_scores[PLAYER_ONE] = _world.points_pending
 	_update_scores()
 	_player_one_streak.show()
 	_player_one_streak.text = "%d DUG / %d PLACED" % [_world.blocks_dug, _world.blocks_placed]
 	_time_label.text = str(_world.day_number())
-	_callout.text = _world.hint if not _world.hint.is_empty() else "SUNNY MEADOWS / PK1"
+	_callout.text = "SNIFFING / %d-CELL RANGE" % _world.scent.range_cells if _world.sniffing \
+		else (_world.hint if not _world.hint.is_empty() else "SUNNY MEADOWS / PK1")
 	_view.present(_world, delta)
 	_dock.present(_world)
 
@@ -205,6 +223,7 @@ func _handle_gameplay_input(event: InputEvent) -> void:
 	if _world == null or _door.visible or _nap_dialog.visible \
 		or _error_dialog.visible or _quit_dialog.visible:
 		return
+	_keys.handle_event(event)
 	if event is InputEventMouseMotion:
 		if _view.get_global_rect().has_point(event.position):
 			_mouse_aim = true
@@ -232,6 +251,7 @@ func _handle_gameplay_input(event: InputEvent) -> void:
 
 func open_pause_menu() -> void:
 	if _world != null and not _save_world("Autosaved before pause."):
+		_clear_controls()
 		_error_dialog.dialog_text = (
 			"Your latest changes could not be saved. The previous save is intact. "
 			+ "Close this message and retry Save world before quitting."
@@ -317,6 +337,11 @@ func _clear_controls() -> void:
 	_wheel = 0
 	if _world != null:
 		_world.cancel_actions()
+		if _view != null:
+			_view.clear_barks()
+			_view.present(_world)
+		if _dock != null:
+			_dock.present(_world)
 
 
 func _configure_mode_ui() -> void:
@@ -328,13 +353,15 @@ func _configure_mode_ui() -> void:
 	_round_instructions.text = "Keep going in this world, or return to the title."
 	if _world != null:
 		_player_one_caption.text += " / " + _world.pup_name
-	_hint.text = "%s/%s run  |  %s/%s aim/climb  |  %s jump  |  %s dig  |  %s place" % [
+	_hint.text = "%s/%s run  |  %s/%s aim/climb  |  %s jump  |  %s sniff  |  %s bark" % [
 		_key_label("left"), _key_label("right"), _key_label("up"), _key_label("down"),
-		_key_label("jump"), _key_label("dig"), _key_label("place"),
+		_key_label("jump"), _key_label("sniff"), _key_label("bark"),
 	]
-	_hint.text += "\n%s back wall  |  %s/%s material  |  Mouse: dig/place/wheel  |  Esc pause" % [
-		_key_label("back_wall"), _key_label("wheel_prev"), _key_label("wheel_next"),
+	_hint.text += "\n%s dig  |  %s place  |  %s back wall  |  %s/%s material" % [
+		_key_label("dig"), _key_label("place"), _key_label("back_wall"),
+		_key_label("wheel_prev"), _key_label("wheel_next"),
 	]
+	_hint.text += "\nMouse: dig/place/wheel  |  Esc pause"
 
 
 func _key_label(suffix: String) -> String:
@@ -342,8 +369,16 @@ func _key_label(suffix: String) -> String:
 
 
 func _on_game_setting_changed(key: String, _value: Variant) -> void:
-	if key == Options.CAMERA_ZOOM_KEY:
+	if key in [Options.SNIFF_MODE_KEY, Options.BARK_CHARGE_KEY]:
+		_clear_controls()
+	if key in [Options.CAMERA_ZOOM_KEY, Options.SNIFF_MODE_KEY, Options.BARK_CHARGE_KEY]:
 		_load_round_settings()
+		_configure_mode_ui()
+
+
+func _on_controls_changed() -> void:
+	super()
+	_clear_controls()
 
 
 func _set_reduced_motion_enabled(value: bool) -> void:
@@ -358,15 +393,25 @@ func _set_intense_effects_enabled(value: bool) -> void:
 	super(value)
 	if _view != null:
 		_view.intense_effects = value
+		if _world != null:
+			_view.present(_world)
 
 
 func _playfield_bounds() -> Rect2:
 	var bounds := super()
 	var bottom := bounds.end.y
+	if _capture_inset > 0.0:
+		bottom = minf(bottom, get_viewport().get_visible_rect().end.y - _capture_inset)
 	if _hint.global_position.y > bounds.position.y:
 		bottom = minf(bottom, _hint.global_position.y - 32.0)
 	bounds.size.y = maxf(120.0, bottom - bounds.position.y - _dock_height())
 	return bounds
+
+
+func _set_capture_inset(bottom: float) -> void:
+	assert(is_finite(bottom) and bottom >= 0.0, "Recorder clearance must be nonnegative.")
+	_capture_inset = bottom
+	_resize_playfield()
 
 
 func _dock_height() -> float:

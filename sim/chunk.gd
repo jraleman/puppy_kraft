@@ -11,6 +11,7 @@ var coordinate := Vector2i.ZERO
 var front := PackedInt32Array()
 var back := PackedInt32Array()
 var dirty := true
+var revision := 0
 
 
 func _init(at := Vector2i.ZERO) -> void:
@@ -28,8 +29,11 @@ func get_block(local: Vector2i, layer := FRONT) -> int:
 
 
 func set_block(local: Vector2i, id: int, layer := FRONT) -> void:
+	if get_block(local, layer) == id:
+		return
 	if layer == FRONT:
 		front[index(local)] = id
 	else:
 		back[index(local)] = id
 	dirty = true
+	revision += 1

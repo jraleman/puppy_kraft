@@ -22,11 +22,14 @@
 | Look-and-feel reference | `games/cube_trials/`, `games/chicken_pit/`, `games/creep_code/` (toy-like 3D in a `SubViewport` under the 2D shell) |
 | Renderer | `gl_compatibility` — unchanged |
 
-**Current implementation scope.** The owner chose Phase 0 plus Milestones 1-2:
-a playable, saved meadow spike, keyboard and mouse first. Players name their
+**Current implementation scope.** The owner chose Phase 0 plus Milestones 1-2,
+then the Milestone 3 sniffing/barking slices with basic energy: a playable,
+saved meadow spike, keyboard and mouse first. Players name their
 pup at world creation; blank means **Pup**. The implementation includes movement,
 digging/placement, PK1 seeds, three world slots, autosaving, a building HUD and
-a procedural 3D view. It does not yet implement the full adventure, Pad/Touch,
+a procedural 3D view, sniff trails for existing crystal/glow-moss deposits
+and the starting bed, and Yip/Woof/Ruff with a saved bark-energy budget.
+It does not yet implement the full adventure, Pad/Touch,
 Pupedia, progression or reward payouts. See `TODO.md` for verified checks and
 still-open hardware/playtest gates.
 
@@ -435,6 +438,14 @@ glow:
 - At night every trail is twice as long and night-only scents appear (§3.7).
 - Reduced motion turns flowing particle trails into static arrows.
 
+**Implemented slice:** existing PK1 crystal/glow-moss markers use an ore zigzag
+and diamond; the starting bed uses home pawprints. A rebindable L, Hold/Toggle,
+the caption, six-cell buried outlines, half-speed walking and 48/96-cell
+day/night ranges are playable. Sniff state is transient and menus cancel it.
+Ambient grass/wood do not create trails. Caches, other structure/quest/lost-item
+scents and night-only finds remain pending with those world systems; this does
+not add night lighting or change PK1 generation.
+
 ### 4.5 Bark power — `sim/puppy_abilities.gd`
 
 | Bark | Input | Range *(tune)* | Effect |
@@ -450,6 +461,16 @@ glow:
   cooldown follows a Ruff or Howl.
 - The tunable **Bark charge** offers Hold (default) or Tap to cycle, for
   players who can't hold buttons.
+
+**Implemented slice:** rebindable I, release-to-fire Hold at 0.5/1.2 s, and
+the owner's chosen Tap sequence: 1-3 taps followed by 0.6 s without another tap
+fires once; the fourth tap cycles to Yip. Pips are numbered 1-3. Woof and Ruff
+gather front-layer leaf blocks within their radius, through other foliage but
+not other solid blocks; back walls remain intact. Captions, original synthesized
+cues and up to four wave rings provide feedback. Reduced motion uses static
+fading rings. Sniffing, menus and mode/rebinding changes cancel charges, not the
+saved energy or Ruff cooldown. Villagers, creatures, snow, echo crystals and
+mechanisms await their systems; Mighty Howl is not exposed.
 
 ### 4.6 Carry, the bag and gear — `sim/inventory.gd`
 
@@ -486,6 +507,15 @@ colour.
 
 The **Survival pace** tunable offers **Cozy** (drains at half rate; hunger and
 warmth never reach 0), **Classic** and **Hardy** (×1.5 drain).
+
+**Implemented basic budget only:** 100 energy, spent only by Woof (3) and Ruff
+(8). After one grounded, inactive second, recover 2 energy per second up to 100.
+Movement, sniffing, digging, placing and barking interrupt rest; paused/modal
+worlds freeze it. Energy, partial rest delay and bark cooldown persist as
+optional additive fields in format 1; old saves default to full energy and no
+cooldown. Other drains, food, low-meter consequences, survival-pace choices and
+the other needs are pending. The current bed closes an outing, not a full nap
+or night skip.
 
 ### 5.2 Courage and the retreat
 
@@ -1181,6 +1211,10 @@ paws on each surface, splashes, yips, woofs and howls (by breed and growth
 stage), gestures' flourishes, villagers' voices (cute babble), threats' cues,
 the shrine's chime. Synthesised or recorded, never taken from elsewhere.
 Every sound that carries meaning has a caption (§12.6).
+
+The current bark-only factory is `audio/bark_audio.gd`, routed through the
+shared `AudioManager.play_sfx` pool and SFX volume/mute. Other world sounds and
+the full audio facade remain future work.
 
 ---
 

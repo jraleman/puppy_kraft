@@ -10,6 +10,8 @@ const Generator = preload("res://games/puppy_kraft/sim/world_gen/world_generator
 const Layout = preload("res://games/puppy_kraft/sim/world_gen/layout.gd")
 const Seeds = preload("res://games/puppy_kraft/sim/seed_words.gd")
 const Body = preload("res://games/puppy_kraft/sim/puppy_body.gd")
+const Needs = preload("res://games/puppy_kraft/sim/needs.gd")
+const Abilities = preload("res://games/puppy_kraft/sim/puppy_abilities.gd")
 const FORMAT_VERSION := 1
 const SLOT_COUNT := 3
 const MAX_FILE_BYTES := 8 * 1024 * 1024
@@ -81,6 +83,9 @@ func read_slot(slot: int) -> Dictionary:
 	world.selected_block = int(config.get_value("pup", "selected_block"))
 	world.inventory = config.get_value("pup", "inventory")
 	world.accumulator = float(config.get_value("world", "accumulator"))
+	world.needs.energy = float(config.get_value("pup", "energy", Needs.MAX_ENERGY))
+	world.needs.rest_ticks = int(config.get_value("pup", "energy_rest_ticks", 0))
+	world.abilities.cooldown_ticks = int(config.get_value("pup", "bark_cooldown_ticks", 0))
 	var body: Dictionary = config.get_value("pup", "body")
 	world.body.position = body["position"]
 	world.body.velocity = body["velocity"]
@@ -152,6 +157,9 @@ func _snapshot(world: World) -> ConfigFile:
 	config.set_value("pup", "body", world.body.snapshot())
 	config.set_value("pup", "inventory", world.inventory)
 	config.set_value("pup", "selected_block", world.selected_block)
+	config.set_value("pup", "energy", world.needs.energy)
+	config.set_value("pup", "energy_rest_ticks", world.needs.rest_ticks)
+	config.set_value("pup", "bark_cooldown_ticks", world.abilities.cooldown_ticks)
 	config.set_value("world", "accumulator", world.accumulator)
 	config.set_value("outing", "blocks_dug", world.blocks_dug)
 	config.set_value("outing", "blocks_placed", world.blocks_placed)
@@ -292,6 +300,17 @@ func _validate_state(config: ConfigFile) -> String:
 	var selected: Variant = config.get_value("pup", "selected_block", null)
 	if typeof(selected) != TYPE_INT or int(selected) not in Blocks.BUILDING_BLOCKS:
 		return "The selected building block is invalid."
+	var energy: Variant = config.get_value("pup", "energy", Needs.MAX_ENERGY)
+	if typeof(energy) not in [TYPE_FLOAT, TYPE_INT] or not is_finite(float(energy)) \
+		or float(energy) < 0.0 or float(energy) > Needs.MAX_ENERGY:
+		return "The pup's energy is invalid."
+	var rest: Variant = config.get_value("pup", "energy_rest_ticks", 0)
+	if typeof(rest) != TYPE_INT or int(rest) < 0 or int(rest) > Needs.REST_DELAY_TICKS:
+		return "The pup's energy rest timing is invalid."
+	var cooldown: Variant = config.get_value("pup", "bark_cooldown_ticks", 0)
+	if typeof(cooldown) != TYPE_INT or int(cooldown) < 0 \
+		or int(cooldown) > Abilities.COOLDOWN_TICKS:
+		return "The pup's bark cooldown is invalid."
 	var raw_body: Variant = config.get_value("pup", "body", null)
 	if typeof(raw_body) != TYPE_DICTIONARY:
 		return "The pup's body state is missing."

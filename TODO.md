@@ -8,12 +8,12 @@ item works **and** its tests pass. Each phase ends with an exit check.
 `§n` points at the matching section of `DESIGN.md`. Run commands from
 `godot-base/`. Framework rules from the root `AGENTS.md` still apply.
 
-**Current deliverable:** Phase 0 plus the playable/saved Milestones 1-2 spike,
-keyboard and mouse first. This is not the entire v1 slice. Seven headless game
+**Current deliverable:** the playable/saved Milestones 1-2 foundation plus the
+Milestone 3 sniffing/barking slices with basic energy, keyboard and mouse first.
+This is not the entire v1 slice. Ten headless game
 suites, the windowed world-view suite and all 15 host suites pass; scene checks
 also run windowed. The desktop profile and remaining manual gates are recorded
-below. Changes are left unstaged/uncommitted for the owner; existing staged
-design/tracker edits are preserved.
+below. Staging and committing remain with the owner.
 
 ---
 
@@ -78,7 +78,7 @@ below that depends on one should start until it is answered.
 As soon as `game.gd` exists, `GameCatalog` loads it and every framework suite
 sweeps it. Start with a stub that passes them, and keep them green from here on.
 
-- [ ] Commit `DESIGN.md` and this `TODO.md` to the game repository.
+- [x] Commit `DESIGN.md` and this `TODO.md` to the game repository.
 - [x] A folder `AGENTS.md` with game-specific agent notes, as Chicken Pit has.
 - [x] `puppy_kraft_options.gd` — constants-only: `GAME_ID`, tunable keys (§13),
       binding keys (§4.2, §13), with empty `BREEDS`, store, gallery and
@@ -128,8 +128,8 @@ sweeps it. Start with a stub that passes them, and keep them green from here on.
 
 **Desktop smoke profile:** Godot 4.7.2, Windows, OpenGL 3.3 Compatibility,
 RTX 4090 / NVIDIA 610.88. At 1280 × 720, 540 × 960 and 2560 × 1080:
-35 mesh chunks, two remeshes maximum per frame, 0.559 ms mean / 1.143 ms maximum
-warmed chunk remesh, and 6 / 6 / 7 world draw calls. The windowed suite checks
+35 mesh chunks, two remeshes maximum per frame, 0.543 ms mean / 1.027 ms maximum
+warmed chunk remesh, and 6 / 6 / 6 world draw calls. The windowed suite checks
 actual pup/terrain pixels, projection, queue limits and the <2 ms / <100 budgets.
 This high-end desktop is not a mid-laptop/web/phone profile. Those hardware
 gates and three-person feel checks remain unverified, so the exit stays open.
@@ -160,14 +160,16 @@ gates and three-person feel checks remain unverified, so the exit stays open.
       and the file is a few KB. The same seed words on another machine give
       the same world.
 
-**Verified locally:** a fresh save is 545 bytes; the edited round-trip fixture
-is 1117 bytes. A real scene creates a named world, digs, saves at dawn/pause/exit,
+**Verified locally:** a fresh save is 600 bytes; the edited round-trip fixture
+is 1172 bytes. A real scene creates a named world, digs, saves at dawn/pause/exit,
 reloads the tunnel and unfinished outing (including the fixed-step remainder),
 then closes it at the bed and keeps going without regeneration. Window-close
 saving is verified by a second process. Corrupt/newer formats, unsupported
 generators and malformed deltas are rejected explicitly. Failed replacements
 keep the prior file; orphaned temporary files are ignored. Unknown additive
-sections/keys and unpaid points survive saving.
+sections/keys and unpaid points survive saving. Optional energy/rest/cooldown
+fields round-trip; older format-1 worlds get explicit defaults without a
+format or PK1 change. Held sniff/bark inputs never resume from a save.
 Generation is fill-order independent over 50 seeds, with a golden PK1 fingerprint.
 Cross-machine confirmation, heavily built <2 MB saves and web backup/restore
 profiling remain open; no rewards or Pupedia are claimed.
@@ -177,15 +179,33 @@ profiling remain open; no rewards or Pupedia are claimed.
 - [ ] `sim/input_frame.gd`; `input/key_source.gd`, `input/pad_source.gd`,
       `input/mouse_aim.gd`, `input/touch_controls.gd` (after
       `drive_controls.gd`, independent multitouch).
-- [ ] `sim/scent.gd` + `world/scent_trails.gd` — trails through blocks, icons
-      and shapes per kind, strongest-scent caption, night doubling, static
-      arrows under reduced motion; Hold / Toggle.
-- [ ] Bark: Yip, Woof, Ruff; charge pips; energy costs; Hold / Tap to cycle.
+- [x] `sim/scent.gd` + `world/scent_trails.gd` — existing PK1 crystal/glow-moss
+      and home trails through blocks, distinct ore/home icons and shapes,
+      six-cell buried outlines, strongest-scent caption, 48/96-cell day/night
+      range, half-speed walking, static reduced-motion arrows and Hold / Toggle.
+- [ ] Other scent sources: treasure caches, cave/structure/quest targets,
+      lost items and night-only finds, as their world systems become available.
+- [x] `tests/scent_test.gd` — discovery through walls, range/night transitions,
+      live edited-source invalidation, stable ties, Hold/Toggle edge buffering,
+      dig suppression and real sniff-to-collection. Scene checks cover rebound L,
+      live settings and pause cancellation; composite pixels cover three layouts
+      and static reduced motion. The recorded walkthrough demonstrates sniffing.
+- [x] Bark: Yip, Woof, Ruff; numbered charge pips; 0/3/8 energy costs;
+      rebindable I; Hold / Tap to cycle (1-3 taps, then 0.6s quiet); one-second
+      Ruff cooldown; reachable front-leaf collection. Original synthesized
+      cues use the shared SFX bus, with captions and bounded wave rings.
+- [x] Basic energy only: 100 points, 2/s recovery after 1s grounded and idle;
+      saved rest delay and bark cooldown, explicit insufficient-energy feedback,
+      cancellation around sniffing, settings and menus, static reduced-motion
+      rings and gentler intense-effects-off feedback.
+- [ ] Other bark interactions: villagers, critters/threats, snow, echo crystals
+      and ancient mechanisms when those world systems exist. No Mighty Howl yet.
 - [ ] Fetch and carry: throw arcs, pickups, the mouth wheel (four picks).
 - [ ] Swimming (surface paddle); water from a placeholder pond.
 - [ ] `sim/inventory.gd` — mouth, wheel, Bandana pouch (8), gear slots.
-- [ ] `sim/needs.gd` — hunger, energy, warmth, happiness; Zoomies; Cozy,
-      Classic, Hardy.
+- [ ] Complete `sim/needs.gd` — hunger, warmth, happiness, running/digging
+      energy and low-meter consequences; Zoomies; Cozy, Classic, Hardy.
+      Only the basic bark budget above is implemented.
 - [ ] Courage: paws, regeneration, the retreat sequence, Groggy, the scent
       bundle; the Retreat penalty tunable.
 - [ ] `sim/day_cycle.gd` — dawn, day, dusk, night; Short / Normal / Long; the
@@ -195,11 +215,28 @@ profiling remain open; no rewards or Pupedia are claimed.
 - [ ] `ui/pk_hud.gd` — needs, courage, charge pips, mouth wheel, scent
       caption; numbers and icons, never colour alone.
 - [ ] `ui/first_steps.gd` — wobble, dig, sniff, bark, nap.
-- [ ] `tests/abilities_test.gd`, `tests/scent_test.gd`, `tests/needs_test.gd`,
-      `tests/lighting_test.gd`.
+- [x] `tests/abilities_test.gd`, `tests/scent_test.gd`, `tests/needs_test.gd`
+      and `tests/audio_test.gd` for implemented abilities and the basic budget.
+- [ ] Full survival-needs coverage and `tests/lighting_test.gd` as those systems land.
 - [ ] **Exit:** on a grey-box meadow, a new player finishes the first steps,
       sniffs out a buried cache, digs it up and survives a night, by keyboard,
       gamepad and touch.
+
+**Sniffing desktop smoke:** first cold night activation (including generation
+and indexing) measured 80.944 ms; 20 cached night scans averaged 1.015 ms.
+This initial hitch is not a web/mobile frame-time pass. PK1's golden terrain
+fingerprint and old-format world round trips still pass; no cache rewards or
+Pupedia entries are invented.
+
+**Barking verified:** real rebound keys and key echo, rapid ordered taps across
+sub-tick frames, exact Hold thresholds, cooldown/cost failures, fixed-tick rest,
+wall/range/layer-safe leaf collection and old-save defaults. Scene checks
+preserve save errors and cancel unfinished charges on pause, nap and setting
+changes; a simultaneous bark/bed use leaves no ring over its modal. Composite
+pixels and real HUDs pass landscape, portrait and ultrawide. The updated
+34-second walkthrough validates all three strengths, rest recovery and a saved
+diary, with recorder-only HUD clearance. Full needs and the milestone exit
+remain open.
 
 ## Milestone 4 — Crafting and dens (§6)
 

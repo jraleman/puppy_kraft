@@ -24,6 +24,12 @@ const PLACE := &"puppy_kraft_place"
 const BACK_WALL := &"puppy_kraft_back_wall"
 const WHEEL_PREV := &"puppy_kraft_wheel_prev"
 const WHEEL_NEXT := &"puppy_kraft_wheel_next"
+const SNIFF := &"puppy_kraft_sniff"
+const SNIFF_HOLD := 0
+const SNIFF_TOGGLE := 1
+const BARK := &"puppy_kraft_bark"
+const BARK_HOLD := 0
+const BARK_TAP := 1
 
 const TUNABLES: Array[Dictionary] = [
 	{
@@ -31,6 +37,24 @@ const TUNABLES: Array[Dictionary] = [
 		"step": 0.05, "format": GameManifest.FORMAT_PERCENT,
 		"title": "Camera zoom", "heading": "World view",
 		"description": "Show more terrain or bring the pup closer. Applies immediately.",
+	},
+	{
+		"key": SNIFF_MODE_KEY, "type": GameManifest.OPTION_CHOICE, "default": SNIFF_HOLD,
+		"choices": [
+			{"value": SNIFF_HOLD, "title": "Hold"},
+			{"value": SNIFF_TOGGLE, "title": "Toggle"},
+		],
+		"title": "Sniff control", "heading": "The pup",
+		"description": "Hold Sniff, or press once to start and again to stop. Menus stop sniffing.",
+	},
+	{
+		"key": BARK_CHARGE_KEY, "type": GameManifest.OPTION_CHOICE, "default": BARK_HOLD,
+		"choices": [
+			{"value": BARK_HOLD, "title": "Hold"},
+			{"value": BARK_TAP, "title": "Tap to cycle"},
+		],
+		"title": "Bark charge", "heading": "The pup",
+		"description": "Hold and release, or tap 1-3 times then pause 0.6s. Menus cancel charging.",
 	},
 ]
 
@@ -54,6 +78,16 @@ const CONTROL_BINDINGS: Array[Dictionary] = [
 	{
 		"key": "controls/puppy_kraft_jump", "action": JUMP, "default": KEY_SPACE,
 		"title": "Jump", "player": 0, "heading": "The pup",
+	},
+	{
+		"key": "controls/puppy_kraft_sniff", "action": SNIFF, "default": KEY_L,
+		"title": "Sniff", "player": 0, "heading": "The pup",
+		"description": "Find crystal, glow moss and a trail home, even through blocks.",
+	},
+	{
+		"key": "controls/puppy_kraft_bark", "action": BARK, "default": KEY_I,
+		"title": "Bark", "player": 0, "heading": "The pup",
+		"description": "Yip, Woof or Ruff. Stronger barks spend energy and shake loose leaves.",
 	},
 	{
 		"key": "controls/puppy_kraft_dig", "action": DIG, "default": KEY_J,

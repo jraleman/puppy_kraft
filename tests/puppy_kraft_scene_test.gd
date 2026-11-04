@@ -9,6 +9,7 @@ const Saves = preload("res://games/puppy_kraft/sim/world_save.gd")
 const Body = preload("res://games/puppy_kraft/sim/puppy_body.gd")
 const Blocks = preload("res://games/puppy_kraft/sim/blocks.gd")
 const Frame = preload("res://games/puppy_kraft/sim/input_frame.gd")
+const Sound = preload("res://games/puppy_kraft/audio/bark_audio.gd")
 
 var _failures := PackedStringArray()
 var _directory := ""
@@ -37,6 +38,8 @@ func _run() -> void:
 	_save_mode = _save_timer.process_mode
 	_save_timer.process_mode = Node.PROCESS_MODE_DISABLED
 	_save_timer.stop()
+	_settings.call("set_value", Options.SNIFF_MODE_KEY, Options.SNIFF_HOLD)
+	_settings.call("set_value", Options.BARK_CHARGE_KEY, Options.BARK_HOLD)
 	var session := get_root().get_node("GameSession")
 	session.call("configure_single_player")
 	GameCatalog.select(Options.GAME_ID)
@@ -82,7 +85,18 @@ func _run() -> void:
 	var dock := game.get("_dock") as Control
 	var hint := game.get_node("%Hint") as Control
 	_expect(dock.get_global_rect().end.y + 12.0 <= hint.get_global_rect().position.y,
-		"Building and save status must clear the shared two-line controls hint.")
+		"Building and save status must clear the shared controls hint.")
+	var view := game.get("_view") as Control
+	var usual_height := view.size.y
+	game.call("_set_capture_inset", 260.0)
+	await process_frame
+	_expect(dock.get_global_rect().end.y <= get_root().get_visible_rect().end.y - 260.0
+		and view.size.y < usual_height,
+		"Recorder clearance must lift the real ability HUD above its lesson card.")
+	game.call("_set_capture_inset", 0.0)
+	await process_frame
+	_expect(is_equal_approx(view.size.y, usual_height),
+		"Recorder-only clearance must not change the ordinary gameplay layout.")
 	await _capture("gameplay")
 	var start := world.body.position
 	Input.action_press(Options.RIGHT)
@@ -113,6 +127,8 @@ func _run() -> void:
 	_settings.call("set_binding_key", jump_key, original_key, Options.GAME_ID)
 	for tick in 120:
 		game.call("_update_round", Body.STEP, 0.0)
+	await _test_sniff_controls(game, world)
+	await _test_bark_controls(game, world)
 	Input.action_press(Options.DOWN)
 	Input.action_press(Options.DIG)
 	for tick in Blocks.dig_ticks(Blocks.GRASS):
@@ -130,6 +146,12 @@ func _run() -> void:
 	_expect(int(saved["error"]) == OK and (saved["world"] as World).ticks == World.DAY_TICKS
 		and (saved["world"] as World).points_pending == 73,
 		"The live dawn event must autosave the new day and unpaid outing points.")
+	_settings.call("set_value", Options.SNIFF_MODE_KEY, Options.SNIFF_TOGGLE)
+	Input.action_press(Options.SNIFF)
+	game.call("_update_round", Body.STEP, 0.0)
+	Input.action_release(Options.SNIFF)
+	game.call("_update_round", Body.STEP, 0.0)
+	_expect(world.sniffing, "The real Toggle setting must latch after a registered key release.")
 	game.call("open_pause_menu")
 	await process_frame
 	var paused_ticks := world.ticks
@@ -140,10 +162,15 @@ func _run() -> void:
 		and (saved["world"] as World).grid.get_block(dug_cell) == Blocks.AIR
 		and (saved["world"] as World).points_pending == 73,
 		"Pause must freeze simulation and persist terrain plus unpaid outing points.")
+	_expect(not world.sniffing and not (game.get("_view") as Control).get("scent_trails").visible,
+		"Opening a shared menu must clear the sniff toggle and its live trail overlay.")
 	var pause_menu := game.get("_pause_menu") as Node
 	pause_menu.call("resume")
 	await process_frame
 	_expect(not paused, "The shared Resume action must unpause the world.")
+	game.call("_update_round", Body.STEP, 0.0)
+	_expect(not world.sniffing, "Resume must not restart a cancelled sniff toggle.")
+	_settings.call("set_value", Options.SNIFF_MODE_KEY, Options.SNIFF_HOLD)
 	var old_zoom := float(_settings.call("tunable", Options.CAMERA_ZOOM_KEY))
 	_settings.call("set_value", Options.CAMERA_ZOOM_KEY, 1.25)
 	_expect(is_equal_approx(float((game.get("_view") as Control).get("zoom")), 1.25),
@@ -182,9 +209,33 @@ func _run() -> void:
 	world.body.position = Vector2(world.grid.generator.layout.bed_cell) + Vector2(0.5, 0.6)
 	world.body.velocity = Vector2.ZERO
 	world.advance(Body.STEP, Frame.new())
+	Input.action_press(Options.BARK)
+	game.call("_update_round", Body.STEP * 35.0, 0.0)
+	_expect(world.abilities.charge_level == 2,
+		"The nap fixture must begin with a real unfinished bark charge.")
+	Input.action_release(Options.BARK)
 	game.call("_show_nap")
 	var nap := game.get("_nap_dialog") as ConfirmationDialog
-	_expect(nap.visible, "Call it a day must require the actual starting bed.")
+	_expect(nap.visible and world.abilities.charge_level == 0,
+		"Call it a day must require the starting bed and cancel unfinished barking.")
+	nap.hide()
+	var bark_at_bed := Frame.new()
+	bark_at_bed.bark = true
+	bark_at_bed.bark_edges.append(true)
+	world.advance(Body.STEP, bark_at_bed)
+	bark_at_bed.bark_edges.clear()
+	world.advance(Body.STEP * 30.0, bark_at_bed)
+	bark_at_bed.bark = false
+	bark_at_bed.bark_edges.append(false)
+	bark_at_bed.mouse_aim = true
+	bark_at_bed.mouse_cell = world.grid.generator.layout.bed_cell
+	bark_at_bed.dig = true
+	bark_at_bed.dig_pressed = true
+	world.advance(Body.STEP, bark_at_bed)
+	game.call("_update_round", 0.0, 0.0)
+	_expect(nap.visible and world.abilities.emitted_total == 1
+		and not (game.get("_view") as Control).get("bark_rings").visible,
+		"A bark and bed-use in one tick must settle before the modal clears their feedback.")
 	nap.hide()
 	nap.confirmed.emit()
 	_expect(not bool(game.get("_round_active")) and (game.get_node("%RoundOver") as Control).visible
@@ -207,6 +258,53 @@ func _run() -> void:
 	_finish()
 
 
+func _test_sniff_controls(game: Node, world: World) -> void:
+	var before := world.blocks_dug
+	Input.action_press(Options.SNIFF)
+	Input.action_press(Options.DIG)
+	game.call("_update_round", Body.STEP, 0.0)
+	var view := game.get("_view") as Control
+	var dock := game.get("_dock") as Control
+	var caption := dock.get("_target") as Label
+	_expect(world.sniffing and world.blocks_dug == before and world.dig_progress == 0
+		and caption.text.contains("Strong scent:") and view.get("scent_trails").visible,
+		"Registered Hold sniff must suppress digging and show the actual strongest-scent caption.")
+	await _capture("sniffing")
+	Input.action_release(Options.SNIFF)
+	Input.action_release(Options.DIG)
+	game.call("_update_round", Body.STEP, 0.0)
+	_expect(not world.sniffing and not view.get("scent_trails").visible,
+		"Releasing the real Hold key must restore the ordinary world view.")
+	var sniff_key := "controls/puppy_kraft_sniff"
+	var original := int(_settings.call("binding_keycode", sniff_key))
+	_expect(bool(_settings.call("set_binding_key", sniff_key, KEY_N, Options.GAME_ID)),
+		"Sniff must be rebindable through the shared Controls registry.")
+	var key := InputEventKey.new()
+	key.physical_keycode = KEY_N
+	key.pressed = true
+	Input.parse_input_event(key)
+	await process_frame
+	game.call("_update_round", Body.STEP, 0.0)
+	_expect(world.sniffing and (game.get_node("%Hint") as Label).text.contains("N sniff"),
+		"The rebound physical Sniff key and visible hint must agree.")
+	key = InputEventKey.new()
+	key.physical_keycode = KEY_N
+	key.pressed = false
+	Input.parse_input_event(key)
+	await process_frame
+	game.call("_update_round", Body.STEP, 0.0)
+	_settings.call("set_binding_key", sniff_key, original, Options.GAME_ID)
+	_settings.call("set_value", Options.SNIFF_MODE_KEY, Options.SNIFF_TOGGLE)
+	Input.action_press(Options.SNIFF)
+	game.call("_update_round", Body.STEP, 0.0)
+	Input.action_release(Options.SNIFF)
+	game.call("_update_round", Body.STEP, 0.0)
+	_expect(world.sniffing, "A live switch to Toggle must use edge-triggered input.")
+	_settings.call("set_value", Options.SNIFF_MODE_KEY, Options.SNIFF_HOLD)
+	_expect(not world.sniffing,
+		"Changing the sniff control mode must stop the old mode rather than inherit its latch.")
+
+
 func _open_game() -> Node:
 	var packed := load("res://games/puppy_kraft/gameplay.tscn") as PackedScene
 	if packed == null:
@@ -221,6 +319,115 @@ func _open_game() -> Node:
 	return game
 
 
+func _test_bark_controls(game: Node, world: World) -> void:
+	var dock := game.get("_dock") as Control
+	var view := game.get("_view") as Control
+	var ability := dock.get("_ability") as Label
+	var status := dock.get("_status") as Label
+	dock.call("show_message", "Retry the last save.", true)
+	Input.action_press(Options.BARK)
+	game.call("_update_round", Body.STEP, 0.0)
+	_expect(world.abilities.charge_level == 1 and ability.text.contains("[1]")
+		and ability.text.contains("Energy 100/100"),
+		"The live Hold key must show numbered charge pips and the real energy budget.")
+	Input.action_release(Options.BARK)
+	game.call("_update_round", Body.STEP, 0.0)
+	_expect(world.abilities.last_level == 1 and world.abilities.emitted_total == 1
+		and ability.text.contains("Yip!") and view.get("bark_rings").visible,
+		"A real quick release must emit a captioned Yip and visible sound-wave feedback.")
+	_expect(status.text.contains("SAVE FAILED") and status.text.contains("Retry"),
+		"Bark feedback must not overwrite an outstanding save-failure status.")
+	game.call("_save_world", "World saved.")
+	var binding := "controls/puppy_kraft_bark"
+	var original := int(_settings.call("binding_keycode", binding))
+	_expect(bool(_settings.call("set_binding_key", binding, KEY_N, Options.GAME_ID)),
+		"Bark must be rebindable through the shared Controls registry.")
+	_bark_key(KEY_N, true)
+	await process_frame
+	game.call("_update_round", Body.STEP, 0.0)
+	var echo := InputEventKey.new()
+	echo.physical_keycode = KEY_N
+	echo.pressed = true
+	echo.echo = true
+	Input.parse_input_event(echo)
+	await process_frame
+	for tick in 29:
+		game.call("_update_round", Body.STEP, 0.0)
+	_expect(ability.text.contains("[2]") and ability.text.contains("Woof")
+		and (game.get_node("%Hint") as Label).text.contains("N bark"),
+		"A held rebound key must cross the actual Woof threshold and update its control hint.")
+	await _capture("bark_charge")
+	_bark_key(KEY_N, false)
+	await process_frame
+	game.call("_update_round", Body.STEP, 0.0)
+	_expect(world.abilities.emitted_total == 2 and world.abilities.last_level == 2
+		and is_equal_approx(world.needs.energy, 97.0) and ability.text.contains("Woof!"),
+		"Releasing the physical key must bark once; key echo must not create extra charges.")
+	var routed := false
+	for child in get_root().get_node("AudioManager").get_children():
+		if child is AudioStreamPlayer and child.bus == "SFX" and child.stream == Sound.bark(2):
+			routed = true
+	_expect(routed, "The live bark must use the shared volume-controlled SFX pool.")
+	await _capture("barking")
+	_settings.call("set_value", Options.BARK_CHARGE_KEY, Options.BARK_TAP)
+	for tap in 3:
+		_bark_key(KEY_N, true)
+		_bark_key(KEY_N, false)
+	await process_frame
+	game.call("_update_round", Body.STEP * 0.5, 0.0)
+	game.call("_update_round", Body.STEP * 0.5, 0.0)
+	_expect(world.abilities.charge_level == 3 and ability.text.contains("[3]"),
+		"Three physical taps between sampled render frames must select Ruff, not disappear.")
+	for tick in 35:
+		game.call("_update_round", Body.STEP, 0.0)
+	_expect(world.abilities.emitted_total == 3 and world.abilities.last_level == 3
+		and is_equal_approx(world.needs.energy, 89.0),
+		"The accessible quiet window must emit exactly one Ruff with its real eight-point cost.")
+	game.call("open_pause_menu")
+	await process_frame
+	var cooldown := world.abilities.cooldown_ticks
+	var energy := world.needs.energy
+	await process_frame
+	var saves: Saves = game.get("_saves")
+	var saved := saves.read_slot(1)
+	_expect(paused and cooldown > 0 and world.abilities.cooldown_ticks == cooldown
+		and world.needs.energy == energy and int(saved["error"]) == OK
+		and (saved["world"] as World).abilities.cooldown_ticks == cooldown
+		and (saved["world"] as World).needs.energy == energy,
+		"Pause must save and freeze the real cooldown and energy instead of clearing either.")
+	_expect(not view.get("bark_rings").visible,
+		"Shared menus must clear bark visuals without leaking them over their overlay.")
+	(game.get("_pause_menu") as Node).call("resume")
+	await process_frame
+	game.call("_update_round", Body.STEP * cooldown, 0.0)
+	Input.action_press(Options.BARK)
+	game.call("_update_round", Body.STEP, 0.0)
+	Input.action_release(Options.BARK)
+	game.call("_update_round", Body.STEP, 0.0)
+	_settings.call("set_value", Options.BARK_CHARGE_KEY, Options.BARK_HOLD)
+	game.call("_update_round", Body.STEP * 40.0, 0.0)
+	_expect(world.abilities.emitted_total == 3 and world.abilities.charge_level == 0,
+		"Changing bark modes must cancel a pending tap without firing it later.")
+	Input.action_press(Options.BARK)
+	game.call("_update_round", Body.STEP * 40.0, 0.0)
+	game.call("open_pause_menu")
+	Input.action_release(Options.BARK)
+	await process_frame
+	(game.get("_pause_menu") as Node).call("resume")
+	await process_frame
+	game.call("_update_round", Body.STEP * 40.0, 0.0)
+	_expect(world.abilities.emitted_total == 3 and world.abilities.charge_level == 0,
+		"Resuming after a cancelled Hold charge must not interpret its release as a bark.")
+	_settings.call("set_binding_key", binding, original, Options.GAME_ID)
+
+
+func _bark_key(code: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.physical_keycode = code
+	event.pressed = pressed
+	Input.parse_input_event(event)
+
+
 func _finish() -> void:
 	if _settings != null:
 		_settings.set("_values", _restore)
@@ -231,7 +438,7 @@ func _finish() -> void:
 	if DirAccess.dir_exists_absolute(_directory):
 		_expect(DirAccess.remove_absolute(_directory) == OK,
 			"The scene fixture must clean up only its own save directory.")
-	await create_timer(0.15, true, false, true).timeout
+	await create_timer(Sound.bark(3).get_length() + 0.05, true, false, true).timeout
 	if _failures.is_empty():
 		print("Puppy Kraft scene tests passed.")
 		quit(0)
