@@ -7,9 +7,11 @@ var _normals := PackedVector3Array()
 var _colors := PackedColorArray()
 var _uvs := PackedVector2Array()
 var _indices := PackedInt32Array()
+var light_code := 1.0
 
 
 func quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, color: Color) -> void:
+	color.a = light_code
 	var first := _vertices.size()
 	var normal := (b - a).cross(c - a).normalized()
 	for point: Vector3 in [a, b, c, d]:

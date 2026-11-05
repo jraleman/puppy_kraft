@@ -19,7 +19,11 @@ const COLORS: Array[Color] = [
 ]
 
 
-static func build(grid: Grid, coordinate: Vector2i) -> ArrayMesh:
+static func build(grid: Grid, coordinate: Vector2i,
+	codes: PackedByteArray = PackedByteArray()) -> ArrayMesh:
+	if codes.is_empty():
+		codes.resize(Chunk.CELLS)
+		codes.fill(255)
 	var builder := Builder.new()
 	var chunk := grid.chunk_at(coordinate)
 	var origin := coordinate * Chunk.SIZE
@@ -29,10 +33,11 @@ static func build(grid: Grid, coordinate: Vector2i) -> ArrayMesh:
 		return builder.finish()
 	var solid := _solidity(grid, front, origin)
 	for row in Chunk.SIZE:
-		_front_runs(builder, front, back, solid, origin, row)
-		_horizontal_runs(builder, front, solid, origin, row, true)
-		_horizontal_runs(builder, front, solid, origin, row, false)
+		_front_runs(builder, front, back, solid, codes, origin, row)
+		_horizontal_runs(builder, front, solid, codes, origin, row, true)
+		_horizontal_runs(builder, front, solid, codes, origin, row, false)
 		for column in Chunk.SIZE:
+			builder.light_code = float(codes[column + row * Chunk.SIZE]) / 255.0
 			var id := front[column + row * Chunk.SIZE]
 			var padded := column + 1 + (row + 1) * PADDED_SIZE
 			if solid[padded] == 0 and id == Blocks.AIR:
@@ -59,7 +64,7 @@ static func build(grid: Grid, coordinate: Vector2i) -> ArrayMesh:
 
 
 static func _front_runs(builder: Builder, front: PackedInt32Array, back: PackedInt32Array,
-	solidity: PackedByteArray, origin: Vector2i, row: int) -> void:
+	solidity: PackedByteArray, codes: PackedByteArray, origin: Vector2i, row: int) -> void:
 	var column := 0
 	var top := -float(origin.y + row) * CELL_METRES
 	var bottom := top - CELL_METRES
@@ -74,7 +79,8 @@ static func _front_runs(builder: Builder, front: PackedInt32Array, back: PackedI
 		while end < Chunk.SIZE:
 			var next := end + row * Chunk.SIZE
 			var next_solid := solidity[end + 1 + (row + 1) * PADDED_SIZE] != 0
-			if solid != next_solid or (front[next] if solid else back[next]) != id:
+			if solid != next_solid or (front[next] if solid else back[next]) != id \
+				or codes[next] != codes[index]:
 				break
 			end += 1
 		var left := float(origin.x + column) * CELL_METRES
@@ -83,13 +89,15 @@ static func _front_runs(builder: Builder, front: PackedInt32Array, back: PackedI
 		var color := _color(id, origin.y + row)
 		if not solid:
 			color = color.darkened(0.32)
+		builder.light_code = float(codes[index]) / 255.0
 		builder.quad(Vector3(left, bottom, z), Vector3(right, bottom, z),
 			Vector3(right, top, z), Vector3(left, top, z), color)
 		column = end
 
 
 static func _horizontal_runs(builder: Builder, front: PackedInt32Array,
-	solidity: PackedByteArray, origin: Vector2i, row: int, top_face: bool) -> void:
+	solidity: PackedByteArray, codes: PackedByteArray, origin: Vector2i,
+	row: int, top_face: bool) -> void:
 	var neighbour_offset := -PADDED_SIZE if top_face else PADDED_SIZE
 	var row_start := (row + 1) * PADDED_SIZE + 1
 	var column := 0
@@ -101,12 +109,14 @@ static func _horizontal_runs(builder: Builder, front: PackedInt32Array,
 			continue
 		var end := column + 1
 		while end < Chunk.SIZE and front[end + row * Chunk.SIZE] == id \
-			and solidity[row_start + end + neighbour_offset] == 0:
+			and solidity[row_start + end + neighbour_offset] == 0 \
+			and codes[end + row * Chunk.SIZE] == codes[column + row * Chunk.SIZE]:
 			end += 1
 		var left := float(origin.x + column) * CELL_METRES
 		var right := float(origin.x + end) * CELL_METRES
 		var y := -float(origin.y + row + (0 if top_face else 1)) * CELL_METRES
 		var color := _color(id, origin.y + row)
+		builder.light_code = float(codes[column + row * Chunk.SIZE]) / 255.0
 		if top_face:
 			builder.quad(Vector3(left, y, REAR_Z), Vector3(left, y, FRONT_Z),
 				Vector3(right, y, FRONT_Z), Vector3(right, y, REAR_Z), color.lightened(0.10))

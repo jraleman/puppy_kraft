@@ -14,6 +14,7 @@ var chunks: Dictionary[Vector2i, Chunk] = {}
 var edits: Dictionary[Vector2i, Dictionary] = {}
 var dirty_chunks: Dictionary[Vector2i, bool] = {}
 var revision := 0
+var column_revisions: Dictionary[int, int] = {}
 var width := Layout.WIDTH
 var height := Layout.HEIGHT
 
@@ -63,6 +64,7 @@ func set_block(cell: Vector2i, id: int, layer := Chunk.FRONT) -> Error:
 		return OK
 	chunk.set_block(local, id, layer)
 	revision += 1
+	column_revisions[cell.x] = column_revisions.get(cell.x, 0) + 1
 	var index := Chunk.index(local) + layer * Chunk.CELLS
 	if id == generator.block_at(cell, layer):
 		if edits.has(coordinate):
@@ -96,6 +98,58 @@ func overlaps_solid(box: Rect2) -> bool:
 		for column in range(first.x, last.x + 1):
 			if solid_at(Vector2i(column, row)):
 				return true
+	return false
+
+
+## Fixed actors move less than one cell per step, so contacts cannot skip a tile.
+func move_box_axis(at: Vector2, size: Vector2, axis: int, distance: float) -> Vector2:
+	assert(is_finite(distance) and absf(distance) < 1.0, "Use sub-cell collision steps.")
+	if distance == 0.0:
+		return at
+	at[axis] += distance
+	var box := Rect2(at - size * 0.5, size)
+	var first := Vector2i((box.position + Vector2.ONE * CONTACT_EPSILON).floor())
+	var last := Vector2i((box.end - Vector2.ONE * CONTACT_EPSILON).floor())
+	var limit := at[axis]
+	for row in range(first.y, last.y + 1):
+		for column in range(first.x, last.x + 1):
+			var cell := Vector2i(column, row)
+			if not solid_at(cell):
+				continue
+			if distance > 0.0:
+				limit = minf(limit, float(cell[axis]) - size[axis] * 0.5)
+			else:
+				limit = maxf(limit, float(cell[axis] + 1) + size[axis] * 0.5)
+	at[axis] = limit
+	return at
+
+
+## Only barks ignore foliage; pickups use the default solid obstruction policy.
+func clear_line(origin: Vector2, target: Vector2, transparent_block: int = Blocks.AIR) -> bool:
+	var at := Vector2i(origin.floor())
+	var last := Vector2i(target.floor())
+	var ray := target - origin
+	var step := Vector2i(int(signf(ray.x)), int(signf(ray.y)))
+	var interval := Vector2(INF if ray.x == 0.0 else absf(1.0 / ray.x),
+		INF if ray.y == 0.0 else absf(1.0 / ray.y))
+	var next := Vector2(INF, INF)
+	if step.x != 0:
+		next.x = (float(at.x + 1) - origin.x) * interval.x if step.x > 0 \
+			else (origin.x - float(at.x)) * interval.x
+	if step.y != 0:
+		next.y = (float(at.y + 1) - origin.y) * interval.y if step.y > 0 \
+			else (origin.y - float(at.y)) * interval.y
+	while true:
+		if solid_at(at) and get_block(at) != transparent_block:
+			return false
+		if at == last:
+			return true
+		if next.x < next.y:
+			at.x += step.x
+			next.x += interval.x
+		else:
+			at.y += step.y
+			next.y += interval.y
 	return false
 
 

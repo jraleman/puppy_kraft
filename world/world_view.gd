@@ -12,6 +12,8 @@ const Puppy = preload("res://games/puppy_kraft/world/puppy_rig.gd")
 const Trails = preload("res://games/puppy_kraft/world/scent_trails.gd")
 const BarkRings = preload("res://games/puppy_kraft/world/bark_rings.gd")
 const SNIFF_SHADER = preload("res://games/puppy_kraft/world/sniff_vision.gdshader")
+const LIGHT_SHADER = preload("res://games/puppy_kraft/world/terrain_lighting.gdshader")
+const Lighting = preload("res://games/puppy_kraft/sim/lighting.gd")
 const LOAD_RADIUS := Vector2i(3, 2)
 const REMESHES_PER_FRAME := 2
 const CAMERA_FOV := 28.0
@@ -27,9 +29,12 @@ var scent_trails: Trails
 var bark_rings: BarkRings
 var _container: SubViewportContainer
 var _stage: Node3D
-var _material: StandardMaterial3D
+var _material: ShaderMaterial
+var _environment: Environment
+var _stick_material: StandardMaterial3D
 var _target: MeshInstance3D
 var _cracks: MeshInstance3D
+var _stick: MeshInstance3D
 var _marker_material: StandardMaterial3D
 var _vision_material: ShaderMaterial
 var _world: World
@@ -41,6 +46,10 @@ var _crack_step := -1
 var _remesh_total_usec := 0
 var _remesh_count := 0
 var _max_remesh_usec := 0
+var _mesh_light_versions: Dictionary[Vector2i, int] = {}
+var _nose: Dictionary[Vector2i, int] = {}
+var _nose_cell := Vector2i(-1, -1)
+var _nose_revision := -1
 
 
 func _init() -> void:
@@ -68,6 +77,7 @@ func _ready() -> void:
 	_stage = Node3D.new()
 	world_viewport.add_child(_stage)
 	var environment := Environment.new()
+	_environment = environment
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = Color("bed9d7")
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -83,11 +93,9 @@ func _ready() -> void:
 	sun.light_energy = 0.8
 	sun.shadow_enabled = false
 	_stage.add_child(sun)
-	_material = StandardMaterial3D.new()
-	_material.vertex_color_use_as_albedo = true
-	_material.roughness = 1.0
-	_material.albedo_texture = _tile_texture()
-	_material.texture_repeat = true
+	_material = ShaderMaterial.new()
+	_material.shader = LIGHT_SHADER
+	_material.set_shader_parameter("tile_texture", _tile_texture())
 	camera = Camera3D.new()
 	camera.fov = CAMERA_FOV
 	camera.keep_aspect = Camera3D.KEEP_HEIGHT
@@ -97,6 +105,7 @@ func _ready() -> void:
 	_stage.add_child(camera)
 	puppy = Puppy.new()
 	_stage.add_child(puppy)
+	_build_stick()
 	_build_marker()
 	scent_trails = Trails.new()
 	scent_trails.name = "ScentTrails"
@@ -116,10 +125,16 @@ func _process(_delta: float) -> void:
 	if _world == null or not visible:
 		return
 	_update_loaded_chunks()
+	var relit := false
 	for count in REMESHES_PER_FRAME:
 		if _pending.is_empty():
 			break
+		var cold := not _world.lighting.is_current(_world.grid, _pending[0])
+		if cold and relit:
+			break
 		_remesh(_pending.pop_front())
+		relit = relit or cold
+	_apply_actor_light(_world)
 
 
 func present(world: World, delta: float = 0.0) -> void:
@@ -128,12 +143,18 @@ func present(world: World, delta: float = 0.0) -> void:
 			mesh.queue_free()
 		_meshes.clear()
 		_pending.clear()
+		_mesh_light_versions.clear()
+		_nose.clear()
+		_nose_cell = Vector2i(-1, -1)
+		_nose_revision = -1
 		_world = world
 		_camera_ready = false
 		_crack_step = -1
 		if bark_rings != null:
 			bark_rings.clear()
 	if world == null or camera == null:
+		if _stick != null:
+			_stick.hide()
 		if scent_trails != null:
 			scent_trails.hide()
 			_vision_material.set_shader_parameter("scent_amount", 0.0)
@@ -142,6 +163,14 @@ func present(world: World, delta: float = 0.0) -> void:
 		return
 	puppy.reduced_motion = reduced_motion
 	puppy.present(world.body, delta)
+	_update_lighting(world)
+	_stick.show()
+	if world.stick.carried:
+		_stick.position = puppy.position + Vector3(world.body.facing * 0.28, 0.075, 0.07)
+	else:
+		_stick.position = Vector3(world.stick.position.x * Mesher.CELL_METRES,
+			-world.stick.position.y * Mesher.CELL_METRES, 0.34)
+	_stick.rotation.y = PI if world.stick.carried and world.body.facing < 0 else 0.0
 	var ahead := 0.0 if reduced_motion else world.body.facing * 2.5
 	var desired := world.body.position + Vector2(ahead, -3.0)
 	if not _camera_ready or reduced_motion:
@@ -184,7 +213,7 @@ func screen_position(cell_position: Vector2) -> Vector2:
 
 
 func metrics() -> Dictionary:
-	return {
+	var result := {
 		"loaded_chunks": _meshes.size(), "queued_chunks": _pending.size(),
 		"max_remesh_ms": float(_max_remesh_usec) / 1000.0,
 		"mean_remesh_ms": float(_remesh_total_usec) / maxf(1, _remesh_count) / 1000.0,
@@ -192,6 +221,9 @@ func metrics() -> Dictionary:
 			Viewport.RENDER_INFO_TYPE_VISIBLE, Viewport.RENDER_INFO_DRAW_CALLS_IN_FRAME
 		),
 	}
+	if _world != null:
+		result.merge(_world.lighting.metrics())
+	return result
 
 
 func _update_loaded_chunks() -> void:
@@ -199,19 +231,25 @@ func _update_loaded_chunks() -> void:
 	centre.x = clampi(centre.x, 0, floori(float(_world.grid.width - 1) / Chunk.SIZE))
 	centre.y = clampi(centre.y, 0, floori(float(_world.grid.height - 1) / Chunk.SIZE))
 	var needed: Dictionary[Vector2i, bool] = {}
+	for coordinate: Vector2i in _world.lighting.changed_chunks(_world.grid):
+		if _meshes.has(coordinate) and not _pending.has(coordinate):
+			_pending.append(coordinate)
 	for row in range(centre.y - LOAD_RADIUS.y, centre.y + LOAD_RADIUS.y + 1):
 		for column in range(centre.x - LOAD_RADIUS.x, centre.x + LOAD_RADIUS.x + 1):
 			var coordinate := Vector2i(column, row)
 			if not _world.grid.contains(coordinate * Chunk.SIZE):
 				continue
 			needed[coordinate] = true
-			if (not _meshes.has(coordinate) or _world.grid.dirty_chunks.has(coordinate)) \
+			if (not _meshes.has(coordinate) or _world.grid.dirty_chunks.has(coordinate)
+				or _mesh_light_versions.get(coordinate, -1) != _world.lighting.version(coordinate)) \
 				and not _pending.has(coordinate):
 				_pending.append(coordinate)
 	for coordinate: Vector2i in _meshes.keys():
 		if not needed.has(coordinate):
 			_meshes[coordinate].queue_free()
 			_meshes.erase(coordinate)
+			_mesh_light_versions.erase(coordinate)
+	_world.lighting.retain_chunks(needed)
 	_pending = _pending.filter(func(at: Vector2i) -> bool: return needed.has(at))
 	_pending.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 		return a.distance_squared_to(centre) < b.distance_squared_to(centre))
@@ -223,8 +261,9 @@ func _remesh(coordinate: Vector2i) -> void:
 		var neighbour := coordinate + offset
 		if _world.grid.contains(neighbour * Chunk.SIZE):
 			_world.grid.chunk_at(neighbour)
+	var codes := _world.lighting.mesh_codes(_world.grid, coordinate, _nose)
 	var start := Time.get_ticks_usec()
-	var mesh := Mesher.build(_world.grid, coordinate)
+	var mesh := Mesher.build(_world.grid, coordinate, codes)
 	var elapsed := Time.get_ticks_usec() - start
 	_remesh_total_usec += elapsed
 	_remesh_count += 1
@@ -236,6 +275,7 @@ func _remesh(coordinate: Vector2i) -> void:
 		_stage.add_child(instance)
 		_meshes[coordinate] = instance
 	_meshes[coordinate].mesh = mesh if mesh.get_surface_count() > 0 else null
+	_mesh_light_versions[coordinate] = _world.lighting.version(coordinate)
 	_world.grid.mark_clean(coordinate)
 
 
@@ -272,6 +312,77 @@ func _build_marker() -> void:
 	_cracks = MeshInstance3D.new()
 	_cracks.material_override = _marker_material
 	_stage.add_child(_cracks)
+
+
+func _build_stick() -> void:
+	var builder := Builder.new()
+	builder.box(Vector3.ZERO, Vector3(0.35, 0.06, 0.055), Color("a96d44"))
+	for end: float in [-0.16, 0.16]:
+		builder.box(Vector3(end, 0, 0.002), Vector3(0.03, 0.062, 0.057), Color("edc592"))
+	builder.box(Vector3(0.065, 0.035, 0), Vector3(0.06, 0.04, 0.045), Color("b98554"))
+	var material := StandardMaterial3D.new()
+	_stick_material = material
+	material.vertex_color_use_as_albedo = true
+	material.roughness = 1.0
+	_stick = MeshInstance3D.new()
+	_stick.name = "FetchStick"
+	_stick.mesh = builder.finish()
+	_stick.material_override = material
+	_stick.hide()
+	_stage.add_child(_stick)
+
+
+func _update_lighting(world: World) -> void:
+	var at := Vector2i(world.body.position.floor())
+	if at != _nose_cell or world.grid.revision != _nose_revision:
+		_queue_nose_chunks(_nose_cell)
+		_nose = world.lighting.nose_field(world.grid, at)
+		_nose_cell = at
+		_nose_revision = world.grid.revision
+		_queue_nose_chunks(at)
+	var daylight := world.clock.daylight()
+	_material.set_shader_parameter("daylight", daylight)
+	_environment.background_color = Color("17233f").lerp(Color("bed9d7"), daylight)
+	_apply_actor_light(world)
+
+
+func _apply_actor_light(world: World) -> void:
+	var at := Vector2i(world.body.position.floor())
+	if world.grid.contains(at) \
+		and not world.lighting.is_current(world.grid, Grid.chunk_coordinate(at)):
+		return
+	var daylight := world.clock.daylight()
+	var level := world.lighting.level_at(world.grid, at, daylight, _nose)
+	puppy.set_illumination(_light_color(level, daylight), level < 8.0)
+	var stick_cell := Vector2i(world.stick.position.floor())
+	var distance := Grid.chunk_coordinate(stick_cell) - Grid.chunk_coordinate(at)
+	if world.stick.carried:
+		_stick_material.albedo_color = _light_color(level, daylight)
+	elif absi(distance.x) <= LOAD_RADIUS.x and absi(distance.y) <= LOAD_RADIUS.y:
+		if world.grid.contains(stick_cell) \
+			and not world.lighting.is_current(world.grid, Grid.chunk_coordinate(stick_cell)):
+			return
+		_stick_material.albedo_color = _light_color(
+			world.lighting.level_at(world.grid, stick_cell, daylight, _nose), daylight)
+
+
+func _queue_nose_chunks(at: Vector2i) -> void:
+	if at.x < 0:
+		return
+	var first := Grid.chunk_coordinate(at - Vector2i.ONE * Lighting.NOSE_LIGHT)
+	var last := Grid.chunk_coordinate(at + Vector2i.ONE * Lighting.NOSE_LIGHT)
+	for row in range(first.y, last.y + 1):
+		for column in range(first.x, last.x + 1):
+			var coordinate := Vector2i(column, row)
+			if _meshes.has(coordinate) and not _pending.has(coordinate):
+				_pending.append(coordinate)
+
+
+func _light_color(level: float, daylight: float) -> Color:
+	var color := Color("a4bdec").lerp(Color.WHITE, daylight) \
+		* (0.2 + 0.8 * clampf(level / Lighting.MAX_LIGHT, 0.0, 1.0))
+	color.a = 1.0
+	return color
 
 
 func _update_marker(world: World) -> void:

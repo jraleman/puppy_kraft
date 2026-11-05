@@ -89,24 +89,8 @@ func _touches_climbable(grid: Grid) -> bool:
 
 
 func _move_axis(grid: Grid, axis: int, distance: float) -> void:
-	if distance == 0.0:
-		return
-	position[axis] += distance
-	var box := bounds()
-	var first := Vector2i((box.position + Vector2.ONE * CONTACT_EPSILON).floor())
-	var last := Vector2i((box.end - Vector2.ONE * CONTACT_EPSILON).floor())
-	var limit := position[axis]
-	var collided := false
-	for row in range(first.y, last.y + 1):
-		for column in range(first.x, last.x + 1):
-			var cell := Vector2i(column, row)
-			if not grid.solid_at(cell):
-				continue
-			collided = true
-			if distance > 0.0:
-				limit = minf(limit, float(cell[axis]) - SIZE[axis] * 0.5)
-			else:
-				limit = maxf(limit, float(cell[axis] + 1) + SIZE[axis] * 0.5)
-	if collided:
-		position[axis] = limit
+	var destination := position
+	destination[axis] += distance
+	position = grid.move_box_axis(position, SIZE, axis, distance)
+	if position != destination:
 		velocity[axis] = 0.0

@@ -8,6 +8,7 @@ const Frame = preload("res://games/puppy_kraft/sim/input_frame.gd")
 const Blocks = preload("res://games/puppy_kraft/sim/blocks.gd")
 const Chunk = preload("res://games/puppy_kraft/sim/chunk.gd")
 const Fixture = preload("res://games/puppy_kraft/tests/world_fixture.gd")
+const FetchStick = preload("res://games/puppy_kraft/sim/fetch_stick.gd")
 
 var _failures := PackedStringArray()
 
@@ -22,6 +23,10 @@ func _initialize() -> void:
 	_test_bark_energy_and_cooldown()
 	_test_bark_cancellation()
 	_test_bark_leaves()
+	_test_carry_and_drop()
+	_test_fetch_arcs()
+	_test_carry_obstructions()
+	_test_carry_cancellation()
 	if _failures.is_empty():
 		print("Puppy Kraft ability tests passed.")
 		quit(0)
@@ -302,3 +307,143 @@ func _hold_bark(world: World, ticks: int) -> Array[Dictionary]:
 		if str(event["type"]) == "barked":
 			result.append(event)
 	return result
+
+
+func _test_carry_and_drop() -> void:
+	var fresh := World.new(42)
+	_expect(not fresh.stick.carried and fresh.grid.edits.is_empty()
+		and fresh.stick.position.distance_to(Vector2(fresh.grid.generator.layout.bed_cell)) < 2.0
+		and not fresh.grid.overlaps_solid(fresh.stick.bounds()),
+		"A new world must supply one loose bedside stick without editing PK1 terrain.")
+	var world := Fixture.world()
+	world.stick.position = world.body.position + Vector2(0.8, 0.2)
+	var carry := Frame.new()
+	carry.carry_pressed = true
+	world.advance(Body.STEP * 0.25, carry)
+	_expect(not world.stick.carried and carry.carry_pressed,
+		"A carry edge must wait for a tick without mutating its caller's frame.")
+	world.advance(Body.STEP * 0.75, Frame.new())
+	world.advance(Body.STEP * 8.0, Frame.new())
+	_expect(world.stick.carried and world.stick.position == world.body.position
+		and world.take_events().size() == 1,
+		"A buffered press must pick up once and keep the single stick at the mouth.")
+	world.advance(Body.STEP, carry)
+	_expect(not world.stick.carried and world.stick.velocity == Vector2.ZERO
+		and world.stick.caption.contains("Dropped")
+		and not world.grid.overlaps_solid(world.stick.bounds()),
+		"Carry while stopped must release the stick into free space without throwing it.")
+	world.advance(Body.STEP * 8.0, carry)
+	_expect(world.stick.carried,
+		"A fresh carry edge in a multi-tick advance must pick up once, not repeatedly toggle.")
+	var run := Frame.new()
+	run.move = 1.0
+	world.advance(Body.STEP * 12.0, run)
+	world.advance(Body.STEP, carry)
+	_expect(not world.stick.carried and world.stick.velocity == Vector2.ZERO,
+		"Releasing movement must request a drop even while the puppy is still decelerating.")
+
+
+func _test_fetch_arcs() -> void:
+	for direction in [-1, 1]:
+		var world := Fixture.world()
+		if direction > 0:
+			for row in range(96, 100):
+				assert(world.grid.set_block(Vector2i(815, row), Blocks.WOOD, Chunk.BACK) == OK)
+		var launch := _throw_stick(world, direction)
+		_expect(not world.stick.carried
+			and world.stick.velocity == Vector2(direction * FetchStick.THROW_SPEED,
+				-FetchStick.THROW_LIFT),
+			"Running Carry must launch once in the actual facing direction.")
+		world.advance(Body.STEP * 12.0, Frame.new())
+		_expect(world.stick.position.y < launch.y - 0.5,
+			"A real throw must rise along an arc before gravity brings it down.")
+		world.advance(Body.STEP * 180.0, Frame.new())
+		_expect((world.stick.position.x - launch.x) * direction > 5.0
+			and absf(world.stick.position.y - (100.0 - FetchStick.SIZE.y * 0.5)) < 0.001
+			and world.stick.velocity == Vector2.ZERO
+			and not world.grid.overlaps_solid(world.stick.bounds()),
+			"A stick must pass back walls, land on front terrain and settle without tunnelling.")
+	var blocked := Fixture.world()
+	for row in range(96, 100):
+		assert(blocked.grid.set_block(Vector2i(815, row), Blocks.STONE) == OK)
+	_throw_stick(blocked, 1)
+	blocked.advance(Body.STEP * 180.0, Frame.new())
+	_expect(blocked.stick.position.x <= 815.0 - FetchStick.SIZE.x * 0.5 + 0.001
+		and blocked.stick.velocity == Vector2.ZERO,
+		"A tall solid wall must stop the actual projectile, not teleport it to the far side.")
+	var fine := Fixture.world()
+	var coarse := Fixture.world()
+	_throw_stick(fine, -1)
+	_throw_stick(coarse, -1)
+	coarse.advance(Body.STEP * 180.5, Frame.new())
+	for frame in 361:
+		fine.advance(Body.STEP * 0.5, Frame.new())
+	_expect(fine.stick.snapshot() == coarse.stick.snapshot()
+		and fine.body.snapshot() == coarse.body.snapshot() and fine.ticks == coarse.ticks,
+		"Flight and landing must be independent of render-frame subdivision.")
+
+
+func _test_carry_obstructions() -> void:
+	var world := Fixture.world()
+	world.stick.position = world.body.position + Vector2(1.0, -1.0)
+	assert(world.grid.set_block(Vector2i(811, 99), Blocks.LEAVES) == OK)
+	var carry := Frame.new()
+	carry.carry_pressed = true
+	world.advance(Body.STEP, carry)
+	_expect(not world.stick.carried and world.stick.caption.contains("solid block"),
+		"Pickup must respect solid foliage rather than inherit a bark's leaf transparency.")
+	assert(world.grid.set_block(Vector2i(811, 99), Blocks.AIR) == OK)
+	world.advance(Body.STEP, carry)
+	_expect(world.stick.carried, "Removing the obstruction must allow the nearby real pickup.")
+	var build := Frame.new()
+	build.mouse_aim = true
+	build.mouse_cell = Vector2i(811, 100)
+	build.dig = true
+	world.advance(Body.STEP * 30.0, build)
+	_expect(world.blocks_dug == 0 and world.dig_progress == 0 and world.hint.contains("Drop"),
+		"Picking up a toy must leave only one mouth item, not dig with a second material or tool.")
+	build.dig = false
+	build.place_pressed = true
+	build.mouse_cell = Vector2i(811, 99)
+	var materials := world.inventory.duplicate()
+	world.advance(Body.STEP, build)
+	_expect(world.blocks_placed == 0 and world.inventory == materials and world.hint.contains("Drop"),
+		"Placing while carrying must explain the refusal without spending building materials.")
+	world.advance(Body.STEP, carry)
+	var cell := Vector2i(world.stick.position.floor())
+	_expect(world.placement_problem(cell, Blocks.WOOD, Chunk.FRONT).contains("stick")
+		and world.placement_problem(cell, Blocks.WOOD, Chunk.BACK).is_empty()
+		and world.placement_problem(cell, Blocks.LADDER, Chunk.FRONT).is_empty(),
+		"Solid front placement must not bury a loose stick; non-solid and back layers remain usable.")
+
+
+func _test_carry_cancellation() -> void:
+	var world := Fixture.world()
+	world.stick.position = world.body.position + Vector2(0.8, 0.2)
+	var carry := Frame.new()
+	carry.carry_pressed = true
+	world.advance(Body.STEP * 0.5, carry)
+	var before := world.stick.snapshot()
+	world.cancel_actions()
+	_expect(world.stick.snapshot() == before,
+		"Opening a menu must not reset or recall the saved loose stick.")
+	world.advance(Body.STEP * 0.5, Frame.new())
+	_expect(not world.stick.carried, "A menu must cancel an unconsumed sub-tick pickup.")
+	world.advance(Body.STEP, carry)
+	before = world.stick.snapshot()
+	world.cancel_actions()
+	_expect(world.stick.snapshot() == before and world.stick.carried,
+		"Cancelling input must not drop or duplicate the item already in the puppy's mouth.")
+
+
+func _throw_stick(world: World, direction: int) -> Vector2:
+	world.stick.position = world.body.position + Vector2(direction * 0.8, 0.2)
+	var frame := Frame.new()
+	frame.carry_pressed = true
+	world.advance(Body.STEP, frame)
+	frame.carry_pressed = false
+	frame.move = direction
+	world.advance(Body.STEP * 12.0, frame)
+	frame.carry_pressed = true
+	world.advance(Body.STEP, frame)
+	return world.stick.position

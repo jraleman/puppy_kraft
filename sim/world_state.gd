@@ -10,6 +10,10 @@ const Frame = preload("res://games/puppy_kraft/sim/input_frame.gd")
 const Scent = preload("res://games/puppy_kraft/sim/scent.gd")
 const Needs = preload("res://games/puppy_kraft/sim/needs.gd")
 const Abilities = preload("res://games/puppy_kraft/sim/puppy_abilities.gd")
+const FetchStick = preload("res://games/puppy_kraft/sim/fetch_stick.gd")
+const Cycle = preload("res://games/puppy_kraft/sim/day_cycle.gd")
+const Lighting = preload("res://games/puppy_kraft/sim/lighting.gd")
+const FirstSteps = preload("res://games/puppy_kraft/sim/first_steps.gd")
 const DIRECTIONAL_REACH := 1.5
 const MOUSE_REACH := 3.0
 const DAY_TICKS := 18 * 60 * 60
@@ -39,6 +43,10 @@ var sniffing := false
 var sniff_toggle := false
 var needs := Needs.new()
 var abilities := Abilities.new()
+var stick: FetchStick
+var clock := Cycle.new()
+var lighting := Lighting.new()
+var first_steps := FirstSteps.new()
 var _dig_cell := Vector2i(-1, -1)
 var _dig_layer := Chunk.FRONT
 var _jump_pending := false
@@ -49,11 +57,13 @@ var _sniff_pressed_pending := false
 var _scent_revision := -1
 var _scent_night := false
 var _bark_edges_pending: Array[bool] = []
+var _carry_pending := false
 
 
 func _init(seed: int = 0, name: String = "Pup", created: int = 0) -> void:
 	grid = Grid.new(seed)
 	body = Body.new(grid.generator.layout.spawn_position())
+	restore_legacy_stick()
 	pup_name = name.strip_edges().substr(0, 32)
 	if pup_name.is_empty():
 		pup_name = "Pup"
@@ -80,6 +90,7 @@ func advance(delta: float, frame: Frame) -> void:
 	_dig_pressed_pending = _dig_pressed_pending or frame.dig_pressed
 	_place_pending = _place_pending or frame.place_pressed
 	_bark_edges_pending.append_array(frame.bark_edges)
+	_carry_pending = _carry_pending or frame.carry_pressed
 	if frame.sniff_pressed:
 		_sniff_pressed_pending = not _sniff_pressed_pending
 	_wheel_pending += frame.wheel_delta
@@ -99,12 +110,14 @@ func advance(delta: float, frame: Frame) -> void:
 		tick_frame.place_pressed = _place_pending
 		tick_frame.sniff_pressed = _sniff_pressed_pending
 		tick_frame.bark_edges.assign(_bark_edges_pending)
+		tick_frame.carry_pressed = _carry_pending
 		_bark_edges_pending.clear()
 		tick_frame.wheel_delta = _wheel_pending
 		_jump_pending = false
 		_dig_pressed_pending = false
 		_place_pending = false
 		_sniff_pressed_pending = false
+		_carry_pending = false
 		_wheel_pending = 0
 		_step(tick_frame)
 		accumulator = maxf(accumulator - Body.STEP, 0.0)
@@ -117,12 +130,22 @@ func cancel_actions() -> void:
 	_place_pending = false
 	_sniff_pressed_pending = false
 	_bark_edges_pending.clear()
+	_carry_pending = false
 	_wheel_pending = 0
 	dig_progress = 0
 	_dig_cell = Vector2i(-1, -1)
 	sniffing = false
 	scent.clear()
 	abilities.cancel()
+	stick.clear_caption()
+
+
+func restore_legacy_stick() -> void:
+	var at := Vector2(grid.generator.layout.bed_cell) + Vector2(1.5, 1.0 - FetchStick.SIZE.y * 0.5)
+	# An old world may have built over the gift's new bedside spot.
+	if grid.overlaps_solid(Rect2(at - FetchStick.SIZE * 0.5, FetchStick.SIZE)):
+		at = body.position
+	stick = FetchStick.new(at)
 
 
 func set_sniff_mode(toggle: bool) -> void:
@@ -144,11 +167,11 @@ func take_events() -> Array[Dictionary]:
 
 
 func day_number() -> int:
-	return 1 + floori(float(ticks) / DAY_TICKS)
+	return clock.day
 
 
 func is_night() -> bool:
-	return ticks % DAY_TICKS >= NIGHT_START_TICKS
+	return clock.is_night()
 
 
 func near_bed() -> bool:
@@ -175,6 +198,9 @@ func placement_problem(cell: Vector2i, id: int, layer: int) -> String:
 		return "That material cannot be a back wall."
 	if layer == Chunk.FRONT and body.bounds().intersects(Rect2(Vector2(cell), Vector2.ONE)):
 		return "Leave room for the pup."
+	if layer == Chunk.FRONT and not stick.carried and Blocks.has_flag(id, Blocks.SOLID) \
+		and stick.bounds().intersects(Rect2(Vector2(cell), Vector2.ONE)):
+		return "Leave room for the stick."
 	if layer == Chunk.FRONT and Blocks.has_flag(id, Blocks.FREE_SUPPORT):
 		return ""
 	if layer == Chunk.FRONT and grid.get_block(cell, Chunk.BACK) != Blocks.AIR:
@@ -191,12 +217,23 @@ func _step(frame: Frame) -> void:
 	var old_day := day_number()
 	var was_sniffing := sniffing
 	ticks += 1
+	clock.step()
 	if sniff_toggle:
 		if frame.sniff_pressed:
 			sniffing = not sniffing
 	else:
 		sniffing = frame.sniff or frame.sniff_pressed
+	var previous_x := body.position.x
 	body.step(grid, frame, 0.5 if sniffing else 1.0)
+	first_steps.walk(absf(body.position.x - previous_x))
+	var was_carried := stick.carried
+	stick.step(grid, body)
+	if frame.carry_pressed:
+		var running := not is_zero_approx(frame.move) \
+			and body.velocity.x * body.facing >= FetchStick.RUN_THRESHOLD
+		var action := stick.interact(grid, body, running)
+		if not action.is_empty():
+			events.append({"type": action, "position": stick.position, "tick": ticks})
 	if frame.wheel_delta != 0:
 		var index := Blocks.BUILDING_BLOCKS.find(selected_block)
 		index = posmod(index + frame.wheel_delta, Blocks.BUILDING_BLOCKS.size())
@@ -221,14 +258,18 @@ func _step(frame: Frame) -> void:
 		hint = "Use the straw bed to call it a day." if near_bed() else ""
 	if sniffing:
 		if not was_sniffing or ticks % Scent.REFRESH_TICKS == 0 \
-			or grid.revision != _scent_revision or is_night() != _scent_night:
-			scent.scan(grid, body.position, is_night())
+			or grid.revision != _scent_revision or is_night() != _scent_night \
+			or was_carried != stick.carried:
+			scent.scan(grid, body.position, is_night(), 1.0, stick)
 			_scent_revision = grid.revision
 			_scent_night = is_night()
+		if not scent.trails.is_empty():
+			first_steps.achieve(FirstSteps.Step.SNIFF)
 	elif was_sniffing:
 		scent.clear()
 	var barks := abilities.step(frame, needs, not sniffing)
 	for bark: Dictionary in barks:
+		first_steps.achieve(FirstSteps.Step.BARK)
 		bark["position"] = body.position
 		bark["tick"] = ticks
 		bark["leaves"] = _shake_leaves(float(bark["range"])) if int(bark["level"]) >= 2 else 0
@@ -239,6 +280,7 @@ func _step(frame: Frame) -> void:
 	needs.step(body.grounded and not body.climbing and absf(body.velocity.x) < 0.05
 		and is_zero_approx(frame.move) and not frame.dig and not frame.dig_pressed
 		and not frame.place_pressed and not sniffing and not frame.bark
+		and not frame.carry_pressed
 		and frame.bark_edges.is_empty() and abilities.charge_level == 0 and barks.is_empty())
 	if day_number() != old_day:
 		events.append({"type": "dawn"})
@@ -265,6 +307,10 @@ func _dig(pressed: bool) -> void:
 		if pressed and near_bed():
 			events.append({"type": "nap_requested"})
 		return
+	if stick.carried:
+		dig_progress = 0
+		hint = "Drop the stick before digging."
+		return
 	if id == Blocks.AIR or Blocks.has_flag(id, Blocks.UNBREAKABLE):
 		dig_progress = 0
 		hint = "Nothing to dig here." if id == Blocks.AIR else "The world boundary stays put."
@@ -286,6 +332,7 @@ func _dig(pressed: bool) -> void:
 		return
 	var drop := int(Blocks.DATA[id]["drops"])
 	blocks_dug += 1
+	first_steps.achieve(FirstSteps.Step.DIG)
 	dig_progress = 0
 	hint = "Gathered %s." % Blocks.title(drop)
 	events.append({"type": "dug", "cell": target_cell, "block": id, "layer": target_layer})
@@ -306,7 +353,9 @@ func _shake_leaves(radius: float) -> int:
 		for column in range(maxi(0, first.x), mini(grid.width - 1, last.x) + 1):
 			var cell := Vector2i(column, row)
 			if body.position.distance_to(Vector2(cell) + Vector2.ONE * 0.5) > radius \
-				or grid.get_block(cell) != Blocks.LEAVES or not _bark_reaches(cell):
+				or grid.get_block(cell) != Blocks.LEAVES \
+				or not grid.clear_line(body.position, Vector2(cell) + Vector2.ONE * 0.5,
+					Blocks.LEAVES):
 				continue
 			var error := _collect_block(cell, Chunk.FRONT, Blocks.LEAVES)
 			if error != OK:
@@ -317,32 +366,10 @@ func _shake_leaves(radius: float) -> int:
 	return gathered
 
 
-func _bark_reaches(target: Vector2i) -> bool:
-	var at := Vector2i(body.position.floor())
-	var ray := Vector2(target) + Vector2.ONE * 0.5 - body.position
-	var step := Vector2i(int(signf(ray.x)), int(signf(ray.y)))
-	var interval := Vector2(INF if ray.x == 0.0 else absf(1.0 / ray.x),
-		INF if ray.y == 0.0 else absf(1.0 / ray.y))
-	var next := Vector2(INF, INF)
-	if step.x != 0:
-		next.x = (float(at.x + 1) - body.position.x) * interval.x if step.x > 0 \
-			else (body.position.x - float(at.x)) * interval.x
-	if step.y != 0:
-		next.y = (float(at.y + 1) - body.position.y) * interval.y if step.y > 0 \
-			else (body.position.y - float(at.y)) * interval.y
-	while at != target:
-		if grid.solid_at(at) and grid.get_block(at) != Blocks.LEAVES:
-			return false
-		if next.x < next.y:
-			at.x += step.x
-			next.x += interval.x
-		else:
-			at.y += step.y
-			next.y += interval.y
-	return true
-
-
 func _place() -> void:
+	if stick.carried:
+		hint = "Drop the stick before placing blocks."
+		return
 	var problem := placement_problem(target_cell, selected_block, target_layer)
 	if problem.is_empty() and inventory[selected_block] <= 0:
 		problem = "No %s in the building bag. Dig some first." % Blocks.title(selected_block)

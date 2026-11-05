@@ -10,6 +10,7 @@ const World = preload("res://games/puppy_kraft/sim/world_state.gd")
 const Body = preload("res://games/puppy_kraft/sim/puppy_body.gd")
 const Frame = preload("res://games/puppy_kraft/sim/input_frame.gd")
 const Fixture = preload("res://games/puppy_kraft/tests/world_fixture.gd")
+const FetchStick = preload("res://games/puppy_kraft/sim/fetch_stick.gd")
 const ORIGIN := Vector2(96.5, 96.5)
 
 var _failures := PackedStringArray()
@@ -24,6 +25,7 @@ func _initialize() -> void:
 	_test_sniff_to_resource()
 	_test_toggle_edges_and_cancel()
 	_test_clock_transition()
+	_test_stick_scent()
 	if _failures.is_empty():
 		print("Puppy Kraft scent tests passed.")
 		quit(0)
@@ -211,6 +213,7 @@ func _test_clock_transition() -> void:
 	var frame := Frame.new()
 	frame.sniff = true
 	world.ticks = World.NIGHT_START_TICKS - 1
+	world.clock.restore_legacy(world.ticks)
 	var started := Time.get_ticks_usec()
 	world.advance(Body.STEP, frame)
 	var cold_ms := float(Time.get_ticks_usec() - started) / 1000.0
@@ -222,6 +225,7 @@ func _test_clock_transition() -> void:
 	var warm_ms := float(Time.get_ticks_usec() - started) / 20000.0
 	print("Night scent query: ", cold_ms, " ms first activation; ", warm_ms, " ms warm mean.")
 	world.ticks = World.DAY_TICKS - 1
+	world.clock.restore_legacy(world.ticks)
 	world.advance(Body.STEP, frame)
 	_expect(not world.is_night() and world.scent.range_cells == Scent.BASE_RANGE
 		and str(world.take_events()[0]["type"]) == "dawn",
@@ -237,6 +241,40 @@ func _empty_grid() -> Grid:
 			var coordinate := Vector2i(column, row)
 			grid.chunks[coordinate] = Chunk.new(coordinate)
 	return grid
+
+
+func _test_stick_scent() -> void:
+	var grid := _empty_grid()
+	var stick := FetchStick.new(Vector2(100.2, 96.8))
+	var scent := Scent.new()
+	scent.scan(grid, ORIGIN, false, 1.0, stick)
+	_expect(scent.trails.size() == 1 and scent.trails[0]["kind"] == "stick"
+		and scent.trails[0]["position"] == stick.position
+		and scent.caption(ORIGIN).contains("your stick, to the right"),
+		"A loose stick must supply its actual position and a named directional scent.")
+	stick.position = ORIGIN + Vector2(64, 0)
+	scent.scan(grid, ORIGIN, false, 1.0, stick)
+	_expect(scent.trails.is_empty(), "A lost stick must respect the real daytime scent range.")
+	scent.scan(grid, ORIGIN, true, 1.0, stick)
+	_expect(scent.trails.size() == 1 and scent.trails[0]["position"] == stick.position,
+		"Moving items must refresh without terrain edits and use the doubled night range.")
+	stick.carried = true
+	scent.scan(grid, ORIGIN, true, 1.0, stick)
+	_expect(scent.trails.is_empty(), "A held stick must not leave a ghost lost-item trail.")
+	var world := Fixture.world()
+	world.stick.position = world.body.position + Vector2(0.8, 0.2)
+	var frame := Frame.new()
+	frame.sniff = true
+	world.advance(Body.STEP, frame)
+	_expect(world.scent.trails[0]["kind"] == "stick",
+		"Sniffing in the real world must reveal a nearby dropped toy.")
+	frame.carry_pressed = true
+	world.advance(Body.STEP, frame)
+	var stale := false
+	for source: Dictionary in world.scent.trails:
+		stale = stale or source["kind"] == "stick"
+	_expect(world.stick.carried and not stale,
+		"Picking up while sniffing must immediately remove the toy trail, even between refresh ticks.")
 
 
 func _bury(grid: Grid, cell: Vector2i, block: int) -> void:

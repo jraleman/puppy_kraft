@@ -28,10 +28,24 @@ const SNIFF := &"puppy_kraft_sniff"
 const SNIFF_HOLD := 0
 const SNIFF_TOGGLE := 1
 const BARK := &"puppy_kraft_bark"
+const CARRY := &"puppy_kraft_carry"
 const BARK_HOLD := 0
 const BARK_TAP := 1
+const DAY_SHORT := 0
+const DAY_NORMAL := 1
+const DAY_LONG := 2
 
 const TUNABLES: Array[Dictionary] = [
+	{
+		"key": DAY_LENGTH_KEY, "type": GameManifest.OPTION_CHOICE, "default": DAY_NORMAL,
+		"choices": [
+			{"value": DAY_SHORT, "title": "Short / 12 minutes"},
+			{"value": DAY_NORMAL, "title": "Normal / 18 minutes"},
+			{"value": DAY_LONG, "title": "Long / 30 minutes"},
+		],
+		"title": "Day length", "heading": "World clock",
+		"description": "Change the pace without skipping the current day or phase. Menus stop time.",
+	},
 	{
 		"key": CAMERA_ZOOM_KEY, "default": 1.0, "min": 0.8, "max": 1.25,
 		"step": 0.05, "format": GameManifest.FORMAT_PERCENT,
@@ -82,12 +96,17 @@ const CONTROL_BINDINGS: Array[Dictionary] = [
 	{
 		"key": "controls/puppy_kraft_sniff", "action": SNIFF, "default": KEY_L,
 		"title": "Sniff", "player": 0, "heading": "The pup",
-		"description": "Find crystal, glow moss and a trail home, even through blocks.",
+		"description": "Find crystal, glow moss, home and your dropped stick through blocks.",
 	},
 	{
 		"key": "controls/puppy_kraft_bark", "action": BARK, "default": KEY_I,
 		"title": "Bark", "player": 0, "heading": "The pup",
 		"description": "Yip, Woof or Ruff. Stronger barks spend energy and shake loose leaves.",
+	},
+	{
+		"key": "controls/puppy_kraft_carry", "action": CARRY, "default": KEY_E,
+		"title": "Carry / drop stick", "player": 0, "heading": "The pup",
+		"description": "Pick up nearby; drop while stopped, or throw while running. Sniff to find it.",
 	},
 	{
 		"key": "controls/puppy_kraft_dig", "action": DIG, "default": KEY_J,
@@ -118,15 +137,15 @@ const CONTROL_BINDINGS: Array[Dictionary] = [
 const SAVE_FILES: Array[Dictionary] = [
 	{
 		"path": "user://puppy_kraft_world_1.cfg", "title": "World 1",
-		"description": "Seed, pup, building materials and changed terrain.",
+		"description": "Seed, pup, stick, building materials and changed terrain.",
 	},
 	{
 		"path": "user://puppy_kraft_world_2.cfg", "title": "World 2",
-		"description": "Seed, pup, building materials and changed terrain.",
+		"description": "Seed, pup, stick, building materials and changed terrain.",
 	},
 	{
 		"path": "user://puppy_kraft_world_3.cfg", "title": "World 3",
-		"description": "Seed, pup, building materials and changed terrain.",
+		"description": "Seed, pup, stick, building materials and changed terrain.",
 	},
 ]
 

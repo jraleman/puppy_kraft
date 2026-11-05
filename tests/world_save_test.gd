@@ -8,6 +8,7 @@ const Blocks = preload("res://games/puppy_kraft/sim/blocks.gd")
 const Chunk = preload("res://games/puppy_kraft/sim/chunk.gd")
 const Body = preload("res://games/puppy_kraft/sim/puppy_body.gd")
 const Frame = preload("res://games/puppy_kraft/sim/input_frame.gd")
+const Progress = preload("res://games/puppy_kraft/sim/first_steps.gd")
 
 var _failures := PackedStringArray()
 var _directory := ""
@@ -20,6 +21,10 @@ func _initialize() -> void:
 	_test_round_trip()
 	_test_transient_sniff_state()
 	_test_bark_state_and_legacy()
+	_test_stick_state_and_legacy()
+	_test_clock_state_and_legacy()
+	_test_first_steps_state_and_legacy()
+	_test_rejected_stick_state()
 	_test_rejected_bark_state()
 	_test_atomic_write()
 	_test_rejected_versions_and_corruption()
@@ -111,6 +116,50 @@ func _test_atomic_write() -> void:
 	assert(DirAccess.remove_absolute(temporary) == OK)
 
 
+func _test_clock_state_and_legacy() -> void:
+	var original := _saves.read_slot(1)
+	assert(int(original["error"]) == OK)
+	var world: World = original["world"]
+	world.clock.day = 8
+	world.clock.phase_units = world.clock.NIGHT_START + 123
+	world.clock.set_pace(world.clock.LONG)
+	assert(int(_saves.write_slot(3, world)["error"]) == OK)
+	var result := _saves.read_slot(3)
+	_expect(int(result["error"]) == OK
+		and (result["world"] as World).clock.snapshot() == world.clock.snapshot()
+		and (result["world"] as World).clock.is_full_moon(),
+		"Day, fractional phase and pace must round-trip independently of physical play time.")
+	var loaded: World = result["world"]
+	world.advance(Body.STEP, Frame.new())
+	loaded.advance(Body.STEP, Frame.new())
+	_expect(world.clock.snapshot() == loaded.clock.snapshot(),
+		"Saving mid-phase must not introduce clock drift on the next step.")
+	var config := ConfigFile.new()
+	assert(config.load(_saves.slot_path(1)) == OK)
+	config.erase_section_key("world", "clock")
+	config.set_value("header", "ticks", World.DAY_TICKS * 7 + World.NIGHT_START_TICKS + 12)
+	config.set_value("header", "day", 8)
+	assert(config.save(_saves.slot_path(3)) == OK)
+	result = _saves.read_slot(3)
+	_expect(int(result["error"]) == OK and (result["world"] as World).clock.is_full_moon()
+		and (result["world"] as World).clock.phase_units == world.clock.NIGHT_START + 120,
+		"Missing clock fields must derive the old save's exact Normal day, not reset it.")
+	for example: Variant in [false, {}, {"day": 0, "phase_units": 0, "pace": 1},
+		{"day": 1, "phase_units": 648000, "pace": 1},
+		{"day": 1, "phase_units": 1.5, "pace": 1},
+		{"day": 1, "phase_units": 0, "pace": 3},
+		{"day": 2, "phase_units": 0, "pace": 1}]:
+		config.set_value("world", "clock", example)
+		assert(config.save(_saves.slot_path(3)) == OK)
+		var before := FileAccess.get_file_as_bytes(_saves.slot_path(3))
+		result = _saves.read_slot(3)
+		_expect(int(result["error"]) != OK and not result.has("world")
+			and FileAccess.get_file_as_bytes(_saves.slot_path(3)) == before,
+			"Malformed or inconsistent clock fields must fail without replacing the file.")
+	assert(config.load(_saves.slot_path(1)) == OK)
+	assert(config.save(_saves.slot_path(3)) == OK)
+
+
 func _test_transient_sniff_state() -> void:
 	var result := _saves.read_slot(1)
 	assert(int(result["error"]) == OK)
@@ -127,6 +176,49 @@ func _test_transient_sniff_state() -> void:
 		and (result["world"] as World).grid.edits == world.grid.edits
 		and (result["world"] as World).inventory == world.inventory,
 		"Loading old-format worlds must preserve terrain and materials without latching sniff input.")
+
+
+func _test_first_steps_state_and_legacy() -> void:
+	var original := _saves.read_slot(1)
+	assert(int(original["error"]) == OK)
+	var world: World = original["world"]
+	world.first_steps = Progress.new()
+	world.first_steps.walk(1.25)
+	assert(int(_saves.write_slot(3, world)["error"]) == OK)
+	var result := _saves.read_slot(3)
+	_expect(int(result["error"]) == OK
+		and (result["world"] as World).first_steps.snapshot() == world.first_steps.snapshot(),
+		"Partial First Steps travel must resume exactly after loading.")
+	world.first_steps.walk(Progress.WALK_DISTANCE)
+	world.first_steps.achieve(Progress.Step.DIG)
+	assert(int(_saves.write_slot(3, world)["error"]) == OK)
+	result = _saves.read_slot(3)
+	_expect(int(result["error"]) == OK
+		and (result["world"] as World).first_steps.step == Progress.Step.SNIFF,
+		"Completed lessons must not repeat after a world is saved and reopened.")
+	var config := ConfigFile.new()
+	assert(config.load(_saves.slot_path(1)) == OK)
+	config.erase_section_key("world", "first_steps")
+	assert(config.save(_saves.slot_path(3)) == OK)
+	result = _saves.read_slot(3)
+	_expect(int(result["error"]) == OK
+		and (result["world"] as World).first_steps.step == Progress.Step.DONE
+		and (result["world"] as World).inventory == world.inventory
+		and (result["world"] as World).grid.edits == world.grid.edits,
+		"Older worlds must skip new-world prompts without losing materials or terrain.")
+	for example: Variant in [false, {}, {"step": "1", "walked": 4.0},
+		{"step": -1, "walked": 0.0}, {"step": 6, "walked": 4.0},
+		{"step": 0, "walked": INF}, {"step": 0, "walked": -1.0},
+		{"step": 0, "walked": 4.0}, {"step": 2, "walked": 0.0}]:
+		config.set_value("world", "first_steps", example)
+		assert(config.save(_saves.slot_path(3)) == OK)
+		var before := FileAccess.get_file_as_bytes(_saves.slot_path(3))
+		result = _saves.read_slot(3)
+		_expect(int(result["error"]) != OK and not result.has("world")
+			and FileAccess.get_file_as_bytes(_saves.slot_path(3)) == before,
+			"Malformed First Steps fields must fail explicitly, never reset or replace the world.")
+	assert(config.load(_saves.slot_path(1)) == OK)
+	assert(config.save(_saves.slot_path(3)) == OK)
 
 
 func _test_rejected_versions_and_corruption() -> void:
@@ -244,6 +336,108 @@ func _test_rejected_bark_state() -> void:
 		_expect(int(result["error"]) != OK and not result.has("world")
 			and FileAccess.get_file_as_bytes(_saves.slot_path(3)) == before,
 			"Malformed %s must fail explicitly without replacing the saved world." % str(example[0]))
+
+
+func _test_stick_state_and_legacy() -> void:
+	var result := _saves.read_slot(1)
+	assert(int(result["error"]) == OK)
+	var world: World = result["world"]
+	world.stick.position = world.body.position + Vector2(0.8, 0.2)
+	var frame := Frame.new()
+	frame.carry_pressed = true
+	world.advance(Body.STEP, frame)
+	assert(world.stick.carried)
+	assert(int(_saves.write_slot(3, world)["error"]) == OK)
+	result = _saves.read_slot(3)
+	_expect(int(result["error"]) == OK, "A genuinely carried stick must be saved and loaded.")
+	if int(result["error"]) != OK:
+		return
+	var loaded: World = result["world"]
+	_expect(loaded.stick.snapshot() == world.stick.snapshot() and loaded.stick.caption.is_empty(),
+		"Loading must retain the mouth item, not its temporary pickup caption or held key.")
+	var forwarded := ConfigFile.new()
+	assert(forwarded.load(_saves.slot_path(3)) == OK)
+	var moved_body: Dictionary = forwarded.get_value("pup", "body")
+	moved_body["position"] += Vector2(1, 0)
+	forwarded.set_value("pup", "body", moved_body)
+	assert(forwarded.save(_saves.slot_path(3)) == OK)
+	result = _saves.read_slot(3)
+	_expect(int(result["error"]) == OK and (result["world"] as World).stick.carried
+		and (result["world"] as World).stick.position == moved_body["position"],
+		"A held item must follow the pup even if an older writer retained its old anchor position.")
+	frame.carry_pressed = false
+	frame.move = 1.0
+	world.advance(Body.STEP * 12.0, frame)
+	frame.carry_pressed = true
+	world.advance(Body.STEP * 1.5, frame)
+	assert(not world.stick.carried and world.stick.velocity.y < 0.0)
+	assert(int(_saves.write_slot(3, world)["error"]) == OK)
+	result = _saves.read_slot(3)
+	assert(int(result["error"]) == OK)
+	loaded = result["world"]
+	_expect(loaded.stick.snapshot() == world.stick.snapshot(),
+		"A mid-flight save must retain the actual projectile's position and velocity.")
+	world.advance(Body.STEP * 180.0, Frame.new())
+	loaded.advance(Body.STEP * 180.0, Frame.new())
+	_expect(loaded.stick.snapshot() == world.stick.snapshot()
+		and loaded.body.snapshot() == world.body.snapshot() and not loaded.stick.carried,
+		"Resuming a throw must match uninterrupted landing without replaying the carry press.")
+	assert(int(_saves.write_slot(3, loaded)["error"]) == OK)
+	result = _saves.read_slot(3)
+	_expect(int(result["error"]) == OK
+		and (result["world"] as World).stick.snapshot() == loaded.stick.snapshot(),
+		"The settled loose stick must stay where it landed across another save.")
+	var config := ConfigFile.new()
+	assert(config.load(_saves.slot_path(1)) == OK)
+	config.erase_section_key("world", "stick")
+	assert(config.save(_saves.slot_path(3)) == OK)
+	result = _saves.read_slot(3)
+	assert(int(result["error"]) == OK)
+	loaded = result["world"]
+	_expect(not loaded.stick.carried and loaded.inventory[Blocks.STONE] == 55
+		and loaded.retained_fields["future_neighbours"]["friendship"] == {"rabbit": 2},
+		"Pre-fetch worlds must receive one starter stick without truncating old bag counts or state.")
+	var bedside := Vector2i(loaded.stick.position.floor())
+	assert(loaded.grid.set_block(bedside, Blocks.WOOD) == OK)
+	loaded.stick.position = loaded.body.position
+	assert(int(_saves.write_slot(3, loaded)["error"]) == OK)
+	assert(config.load(_saves.slot_path(3)) == OK)
+	config.erase_section_key("world", "stick")
+	assert(config.save(_saves.slot_path(3)) == OK)
+	result = _saves.read_slot(3)
+	_expect(int(result["error"]) == OK
+		and (result["world"] as World).stick.position == loaded.body.position,
+		"If an old world built over the bedside gift, it must appear safely beside the saved pup.")
+
+
+func _test_rejected_stick_state() -> void:
+	var original := _saves.read_slot(1)
+	assert(int(original["error"]) == OK)
+	var world: World = original["world"]
+	var buried := Vector2i(world.body.position.floor()) + Vector2i(3, 0)
+	assert(world.grid.set_block(buried, Blocks.WOOD) == OK)
+	world.stick.position = Vector2(buried) + Vector2.ONE * 0.5
+	assert(int(_saves.write_slot(3, world)["error"]) == OK)
+	var result := _saves.read_slot(3)
+	_expect(int(result["error"]) != OK and str(result["message"]).contains("stick"),
+		"A saved loose item embedded in solid front terrain must fail explicitly.")
+	for example: Variant in [
+		"stick", {}, {"position": Vector2.ZERO, "velocity": Vector2.ZERO, "carried": 1},
+		{"position": Vector2(INF, 99), "velocity": Vector2.ZERO, "carried": false},
+		{"position": Vector2(-1, 99), "velocity": Vector2.ZERO, "carried": false},
+		{"position": Vector2(768, 99), "velocity": Vector2(100, 0), "carried": false},
+		{"position": Vector2(768, 99), "velocity": Vector2(0, -100), "carried": false},
+		{"position": Vector2(768, 99), "velocity": Vector2(1, 0), "carried": true},
+	]:
+		var config := ConfigFile.new()
+		assert(config.load(_saves.slot_path(1)) == OK)
+		config.set_value("world", "stick", example)
+		assert(config.save(_saves.slot_path(3)) == OK)
+		var before := FileAccess.get_file_as_bytes(_saves.slot_path(3))
+		result = _saves.read_slot(3)
+		_expect(int(result["error"]) != OK and not result.has("world")
+			and FileAccess.get_file_as_bytes(_saves.slot_path(3)) == before,
+			"Malformed fetch state must be rejected, never reset to a success-shaped starter gift.")
 
 
 func _cleanup() -> void:

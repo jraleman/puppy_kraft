@@ -9,9 +9,10 @@ const World = preload("res://games/puppy_kraft/sim/world_state.gd")
 const Saves = preload("res://games/puppy_kraft/sim/world_save.gd")
 const Blocks = preload("res://games/puppy_kraft/sim/blocks.gd")
 const Chunk = preload("res://games/puppy_kraft/sim/chunk.gd")
+const Progress = preload("res://games/puppy_kraft/sim/first_steps.gd")
 const STEPS: Array[Dictionary] = [
 	{"time": 0.0, "title": "Your pup, your saved world",
-		"body": "Choose a Den Door slot and enter a name and seed. Blank name means Pup; blank seed makes a random meadow."},
+		"body": "Choose a Den Door slot, name and seed. Blank name means Pup; blank seed makes a random meadow. New worlds offer saved First Steps prompts; Skip never locks abilities."},
 	{"time": 3.0, "title": "Run, jump and climb",
 		"body": "A and D run, Space jumps, and W and S climb roots or ladders. One-cell tunnels fit. Falls never hurt."},
 	{"time": 10.5, "title": "Dig to gather toy blocks",
@@ -24,13 +25,19 @@ const STEPS: Array[Dictionary] = [
 		"body": "Hold L to sniff through walls: zigzags lead to crystal or glow moss, pawprints lead home. Read the strongest-scent caption. Toggle is available in Settings."},
 	{"time": 20.4, "title": "Yip, Woof, Ruff!",
 		"body": "Hold I and release at the numbered pips. Woof costs 3 energy, Ruff costs 8. Strong barks shake leaves; standing still restores energy. Tap to cycle is in Settings."},
-	{"time": 29.0, "title": "Save, then return to your bed",
-		"body": "Save world keeps your edits. Call it a day opens the saved diary; Keep going returns without regenerating terrain."},
+	{"time": 26.4, "title": "Pick up your starter stick",
+		"body": "E picks up the nearby stick. Press again while stopped to drop it. Drop the stick before digging or building."},
+	{"time": 28.1, "title": "Run, throw, fetch!",
+		"body": "Get moving, then press E to throw an arc. Front terrain stops the stick; back walls do not. It stays where it lands."},
+	{"time": 30.0, "title": "Sniff out a lost stick",
+		"body": "Hold L for the dotted STICK trail. Follow your nose, then press E nearby to fetch that same stick again."},
+	{"time": 34.4, "title": "Bring it home, then save",
+		"body": "Save world keeps your stick and edits. At the bed, Call it a day opens the saved diary; Keep going returns to the same world."},
 ]
 const ACTIONS: Array[StringName] = [
 	Options.LEFT, Options.RIGHT, Options.UP, Options.DOWN, Options.JUMP,
 	Options.DIG, Options.PLACE, Options.BACK_WALL, Options.WHEEL_PREV, Options.WHEEL_NEXT,
-	Options.SNIFF, Options.BARK,
+	Options.SNIFF, Options.BARK, Options.CARRY,
 ]
 
 var _done: Dictionary[String, bool] = {}
@@ -47,13 +54,13 @@ func steps() -> Array[Dictionary]:
 
 
 func duration() -> float:
-	return 34.0
+	return 43.0
 
 
 func settings_overrides() -> Dictionary:
 	return {
 		Options.CAMERA_ZOOM_KEY: 1.0, Options.SNIFF_MODE_KEY: Options.SNIFF_HOLD,
-		Options.BARK_CHARGE_KEY: Options.BARK_HOLD,
+		Options.BARK_CHARGE_KEY: Options.BARK_HOLD, Options.DAY_LENGTH_KEY: Options.DAY_NORMAL,
 	}
 
 
@@ -82,6 +89,7 @@ func update(scene: Node, time: float, _delta: float) -> void:
 	if world == null or not bool(scene.get("_round_active")):
 		_release_controls()
 		return
+	_done["first_step_%d" % world.first_steps.step] = true
 	var layout := world.grid.generator.layout
 	var wall := layout.bed_cell + Vector2i(-3, 0)
 	_done["jumped"] = _done.get("jumped", false) \
@@ -100,12 +108,31 @@ func update(scene: Node, time: float, _delta: float) -> void:
 	_done["energy_recovered"] = _done.get("energy_recovered", false) \
 		or (time >= 25.0 and time < 26.4 and world.needs.energy > 89.1
 			and world.needs.energy < 100.0)
+	_done["carried"] = _done.get("carried", false) \
+		or (time >= 27.2 and time < 28.1 and world.stick.carried)
+	_done["dropped"] = _done.get("dropped", false) \
+		or (time >= 27.55 and time < 27.85 and not world.stick.carried
+			and _done.get("carried", false))
+	_done["thrown"] = _done.get("thrown", false) \
+		or (time >= 28.6 and time < 30.0 and not world.stick.carried
+			and world.stick.velocity.x > 4.0 and world.stick.velocity.y < 0.0)
+	_done["fetched"] = _done.get("fetched", false) \
+		or (time >= 30.0 and world.stick.carried and _done.get("thrown", false))
+	if time >= 30.0 and world.sniffing:
+		for source: Dictionary in world.scent.trails:
+			if str(source["kind"]) == "stick":
+				_done["stick_scent"] = true
 	var direction := 0.0
 	if time >= 3.0 and time < 5.0:
 		direction = float(layout.spawn_column) + 8.5 - world.body.position.x
 	elif time >= 7.2 and time < 10.5:
 		direction = -1.0
-	elif time >= 26.4 and time < 28.8:
+	elif (time >= 26.4 and time < 27.2) or (time >= 30.0 and time < 33.4):
+		var offset := world.stick.position.x - world.body.position.x
+		direction = offset if absf(offset) > 0.75 else 0.0
+	elif time >= 28.1 and time < 28.8:
+		direction = 1.0
+	elif time >= 34.4 and time < 37.8:
 		direction = float(layout.bed_cell.x) + 0.5 - world.body.position.x
 	# A physical cursor hovering over the window must not change the keyboard lesson.
 	scene.set("_mouse_aim", false)
@@ -121,14 +148,18 @@ func update(scene: Node, time: float, _delta: float) -> void:
 		or (time >= 16.0 and time < 16.6), "Shift")
 	_hold(Options.PLACE, (time >= 16.0 and time < 16.2)
 		or (time >= 17.0 and time < 17.2), "K")
-	_hold(Options.SNIFF, time >= 18.2 and time < 20.2, "L")
+	_hold(Options.SNIFF, (time >= 18.2 and time < 20.2)
+		or (time >= 30.0 and time < 33.8), "L")
 	_hold(Options.BARK, (time >= 20.4 and time < 20.5)
 		or (time >= 21.0 and time < 21.6) or (time >= 22.4 and time < 23.8), "I")
-	if _once("save", time >= 29.0):
+	_hold(Options.CARRY, (time >= 27.2 and time < 27.3)
+		or (time >= 27.55 and time < 27.65) or (time >= 27.85 and time < 27.95)
+		or (time >= 28.65 and time < 28.75) or (time >= 33.4 and time < 33.5), "E")
+	if _once("save", time >= 38.0):
 		(scene.get("_dock") as Control).emit_signal("save_requested")
-	if _once("nap", time >= 29.7):
+	if _once("nap", time >= 38.7):
 		scene.call("_show_nap")
-	if _once("diary", time >= 30.7):
+	if _once("diary", time >= 39.7):
 		var dialog := scene.get("_nap_dialog") as ConfirmationDialog
 		if not dialog.visible:
 			push_error("The tutorial did not reach the bed for a real nap.")
@@ -144,9 +175,12 @@ func validate_finished(scene: Node) -> bool:
 		push_error("The tutorial never created its world.")
 		return false
 	var complete := not world.outing_open and world.blocks_dug == 2 and world.blocks_placed == 2
+	for step in range(Progress.Step.DONE):
+		complete = complete and _done.get("first_step_%d" % step, false)
 	for milestone: String in [
 		"jumped", "climbed", "front_dug", "back_dug", "sniffed",
 		"bark_1", "bark_2", "bark_3", "energy_recovered", "save", "diary",
+		"carried", "dropped", "thrown", "stick_scent", "fetched",
 	]:
 		complete = complete and _done.get(milestone, false)
 	var saves := scene.get("_saves") as Saves
@@ -158,6 +192,10 @@ func validate_finished(scene: Node) -> bool:
 	complete = complete and saved.body.position == world.body.position \
 		and not saved.outing_open and saved.blocks_dug == 2 and saved.blocks_placed == 2 \
 		and world.abilities.emitted_total == 3 \
+		and world.stick.carried and saved.stick.snapshot() == world.stick.snapshot() \
+		and saved.clock.snapshot() == world.clock.snapshot() \
+		and world.first_steps.step == Progress.Step.DONE \
+		and saved.first_steps.snapshot() == world.first_steps.snapshot() \
 		and is_equal_approx(saved.needs.energy, world.needs.energy)
 	if not complete:
 		push_error("Puppy tutorial incomplete: dug=%d, placed=%d, at=%s, milestones=%s."

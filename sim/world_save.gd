@@ -12,6 +12,9 @@ const Seeds = preload("res://games/puppy_kraft/sim/seed_words.gd")
 const Body = preload("res://games/puppy_kraft/sim/puppy_body.gd")
 const Needs = preload("res://games/puppy_kraft/sim/needs.gd")
 const Abilities = preload("res://games/puppy_kraft/sim/puppy_abilities.gd")
+const FetchStick = preload("res://games/puppy_kraft/sim/fetch_stick.gd")
+const Cycle = preload("res://games/puppy_kraft/sim/day_cycle.gd")
+const FirstSteps = preload("res://games/puppy_kraft/sim/first_steps.gd")
 const FORMAT_VERSION := 1
 const SLOT_COUNT := 3
 const MAX_FILE_BYTES := 8 * 1024 * 1024
@@ -76,6 +79,13 @@ func read_slot(slot: int) -> Dictionary:
 		int(config.get_value("header", "created_unix"))
 	)
 	world.ticks = int(config.get_value("header", "ticks"))
+	world.clock.restore_legacy(world.ticks)
+	if config.has_section_key("world", "clock"):
+		world.clock.restore(config.get_value("world", "clock"))
+	if config.has_section_key("world", "first_steps"):
+		world.first_steps.restore(config.get_value("world", "first_steps"))
+	else:
+		world.first_steps.skip()
 	world.points_pending = int(config.get_value("header", "pending_points"))
 	world.blocks_dug = int(config.get_value("outing", "blocks_dug"))
 	world.blocks_placed = int(config.get_value("outing", "blocks_placed"))
@@ -105,6 +115,15 @@ func read_slot(slot: int) -> Dictionary:
 				world.retained_fields[section][key] = config.get_value(section, key)
 	if world.grid.overlaps_solid(world.body.bounds()):
 		return _failure(ERR_FILE_CORRUPT, "The saved pup is inside a solid block.")
+	if config.has_section_key("world", "stick"):
+		var stick: Dictionary = config.get_value("world", "stick")
+		world.stick.carried = bool(stick["carried"])
+		world.stick.position = world.body.position if world.stick.carried else stick["position"]
+		world.stick.velocity = stick["velocity"]
+		if not world.stick.carried and world.grid.overlaps_solid(world.stick.bounds()):
+			return _failure(ERR_FILE_CORRUPT, "The saved stick is inside a solid block.")
+	else:
+		world.restore_legacy_stick()
 	return {"error": OK, "world": world}
 
 
@@ -161,6 +180,9 @@ func _snapshot(world: World) -> ConfigFile:
 	config.set_value("pup", "energy_rest_ticks", world.needs.rest_ticks)
 	config.set_value("pup", "bark_cooldown_ticks", world.abilities.cooldown_ticks)
 	config.set_value("world", "accumulator", world.accumulator)
+	config.set_value("world", "stick", world.stick.snapshot())
+	config.set_value("world", "clock", world.clock.snapshot())
+	config.set_value("world", "first_steps", world.first_steps.snapshot())
 	config.set_value("outing", "blocks_dug", world.blocks_dug)
 	config.set_value("outing", "blocks_placed", world.blocks_placed)
 	config.set_value("outing", "open", world.outing_open)
@@ -279,13 +301,26 @@ func _validate_header(config: ConfigFile) -> String:
 	if typeof(words) != TYPE_STRING \
 		or str(words) != Seeds.to_words(int(config.get_value("header", "seed"))):
 		return "The seed words do not match the saved seed."
-	var expected_day := 1 + floori(float(config.get_value("header", "ticks")) / World.DAY_TICKS)
-	if int(config.get_value("header", "day")) != expected_day:
-		return "The saved day does not match the world clock."
+	if not config.has_section_key("world", "clock"):
+		var clock := Cycle.new()
+		clock.restore_legacy(int(config.get_value("header", "ticks")))
+		if int(config.get_value("header", "day")) != clock.day:
+			return "The saved day does not match the world clock."
 	return ""
 
 
 func _validate_state(config: ConfigFile) -> String:
+	if config.has_section_key("world", "first_steps"):
+		var problem := FirstSteps.validate(config.get_value("world", "first_steps"))
+		if not problem.is_empty():
+			return problem
+	if config.has_section_key("world", "clock"):
+		var clock: Variant = config.get_value("world", "clock")
+		var problem := Cycle.validate(clock)
+		if not problem.is_empty():
+			return problem
+		if int(clock["day"]) != int(config.get_value("header", "day")):
+			return "The saved day does not match the world clock."
 	var name: Variant = config.get_value("pup", "name", null)
 	if typeof(name) != TYPE_STRING or str(name).strip_edges().is_empty() \
 		or str(name).length() > 32:
@@ -346,6 +381,33 @@ func _validate_state(config: ConfigFile) -> String:
 		or not is_finite(float(accumulator)) or float(accumulator) < 0.0 \
 		or float(accumulator) >= Body.STEP + 0.000000001:
 		return "The world's fixed-step remainder is invalid."
+	return _validate_stick(config)
+
+
+func _validate_stick(config: ConfigFile) -> String:
+	if not config.has_section_key("world", "stick"):
+		return ""
+	var raw: Variant = config.get_value("world", "stick")
+	if typeof(raw) != TYPE_DICTIONARY:
+		return "The fetch stick's state is invalid."
+	var stick: Dictionary = raw
+	if typeof(stick.get("carried")) != TYPE_BOOL:
+		return "The fetch stick's carry state is invalid."
+	for key in ["position", "velocity"]:
+		if typeof(stick.get(key)) != TYPE_VECTOR2 or not (stick[key] as Vector2).is_finite():
+			return "The fetch stick's %s is invalid." % key
+	var position: Vector2 = stick["position"]
+	var velocity: Vector2 = stick["velocity"]
+	if position.x < FetchStick.SIZE.x * 0.5 \
+		or position.x > Layout.WIDTH - FetchStick.SIZE.x * 0.5 \
+		or position.y < -Layout.HEIGHT or position.y > Layout.HEIGHT - FetchStick.SIZE.y * 0.5:
+		return "The fetch stick's position is outside the world."
+	if absf(velocity.x) > FetchStick.THROW_SPEED + 0.01 \
+		or velocity.y < -FetchStick.THROW_LIFT - 0.01 \
+		or velocity.y > Body.MAX_FALL_SPEED + 0.01:
+		return "The fetch stick's velocity is outside the supported limits."
+	if bool(stick["carried"]) and velocity != Vector2.ZERO:
+		return "The carried stick cannot have independent velocity."
 	return ""
 
 

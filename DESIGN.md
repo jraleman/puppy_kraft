@@ -23,12 +23,20 @@
 | Renderer | `gl_compatibility` — unchanged |
 
 **Current implementation scope.** The owner chose Phase 0 plus Milestones 1-2,
-then the Milestone 3 sniffing/barking slices with basic energy: a playable,
-saved meadow spike, keyboard and mouse first. Players name their
-pup at world creation; blank means **Pup**. The implementation includes movement,
+then the Milestone 3 sniffing, barking, starter-stick, day/night, lighting and
+First Steps slices with basic energy: a playable, saved meadow spike, keyboard
+and mouse first. Players name their pup at world creation; blank means **Pup**.
+The implementation includes movement,
 digging/placement, PK1 seeds, three world slots, autosaving, a building HUD and
 a procedural 3D view, sniff trails for existing crystal/glow-moss deposits
-and the starting bed, and Yip/Woof/Ruff with a saved bark-energy budget.
+and the starting bed, Yip/Woof/Ruff with a saved bark-energy budget, and one
+persistent fetch toy with a lost-stick scent. Saved, phase-preserving 12/18/30-minute
+days drive dawn autosaves, dusk warnings, eighth-night moonlight, sky/terrain
+lighting, crystal/glow-moss emitters and the moving nose glow.
+New worlds offer five saved, non-blocking onboarding prompts; older worlds
+are exempt and Skip never gates an ability.
+The owner chose to keep the
+existing building bag rather than introduce the full inventory/mouth wheel.
 It does not yet implement the full adventure, Pad/Touch,
 Pupedia, progression or reward payouts. See `TODO.md` for verified checks and
 still-open hardware/playtest gates.
@@ -170,6 +178,23 @@ days (§3.7). A short phone session can call it a day after five minutes and
 still see a diary and a payout. The v1 story takes **6–10 hours** *(tune)*.
 The sandbox has no end.
 
+### 2.3 Implemented First Steps — `sim/first_steps.gd`, `ui/first_steps.gd`
+
+The current prototype teaches **Wobble → Dig → Sniff → Bark → Home** during
+ordinary play, not a separate tutorial level. Walk four cumulative horizontal
+cells, remove one block, reveal a real scent trail, emit any successful bark
+(a free Yip is enough), then confirm the saved bed diary. Held input against
+a wall, empty digs, suppressed/rejected barks and cancelled charges do not
+count. Earlier actions remain available but are not credited retroactively.
+
+The HUD follows current rebound keys and Hold/Toggle/Tap settings immediately.
+It explains active sniff and carried-stick blockers without changing those
+mechanics. Menus and new outings do not reset progress. Skip persists a
+dismissal without changing terrain, inventory or ability access. Failed Skip
+and final-bed writes restore progress; the last prompt completes only after
+the outing is saved successfully. This slice grants no rewards or tricks and
+does not implement Sit, a full nap or sleep-to-dawn.
+
 ---
 
 ## 3. The block world
@@ -290,17 +315,29 @@ and holds the Cavern Wyrm (§7.3).
 Light lives in the model, not in Godot lights, so `gl_compatibility` never
 needs dozens of dynamic lights:
 
-- **Skylight** shines down every column until it hits a front block or a back
+- **Skylight** shines down every column until it hits a solid front block or a back
   wall, scaled by the time of day (§3.7).
 - **Block light** flood-fills from emitters (lanterns, crystals, glow moss),
   losing one level per cell, 0–15.
-- An edit relights only the chunks it touches. The view bakes light into the
+- An edit invalidates affected nearby fields and roof shadows below it, not
+  the entire world. The view bakes light into the
   chunk meshes' **vertex colours**, so night falls without one extra draw call.
 - The pup has a soft **nose glow**, light 3 *(tune)*, so a pitch-black cave is
   never totally unreadable.
 
 Light matters to gameplay: threats never spawn on cells with light ≥ 8, and a
 den needs light (§6.2).
+
+**Implemented slice.** Existing crystal emits level 9 and glow moss level 6;
+lanterns, dens and threat spawning are not present yet. Static 32-cell fields
+use a 15-cell halo, cached skylight cutoffs and terrain revisions. Front solids
+and every non-air back tile block direct sky; ordinary light diffuses through
+front air. Cutaway solid faces sample neighbouring light. Vertex alpha packs
+separate sky/local nibbles, allowing a Compatibility shader to change daylight
+without rebuilding fields or meshes. The view retains at most 35 fields, rebuilds
+at most one cold field and two meshes per frame, and samples cached actor illumination
+without bypassing that budget. Level-three nose light is a separate moving
+overlay; reduced motion does not freeze it.
 
 ### 3.7 Day, night and weather — `sim/day_cycle.gd`, `sim/weather.gd`
 
@@ -319,6 +356,14 @@ Every eighth night is a **full moon**: a moonlit howl night (§9.4).
 Weather rolls once per day per biome: clear, breezy, rain (puddles, warmth
 drain, crops watered) or **storm** (grumpy storm clouds, §5.3). Weather is
 seeded from the world seed and the day number, so it is deterministic.
+
+**Implemented slice.** All four phases and pace choices work; phase lengths
+scale proportionally. Integer phase units preserve exact phase/day on a live
+pace change, independently of physical play ticks. The six-second dusk warning
+does not replace save-error feedback. Each eighth night has a **FULL MOON**
+header and brighter lighting, not a literal moon mesh or howl event. Dawn
+starts at the preceding night's brightness. Weather, crops, villagers,
+night-only finds, threats and sleeping through the night remain future work.
 
 ### 3.8 World slots, saves and seeds — `sim/world_save.gd`, `sim/seed_words.gd`
 
@@ -340,6 +385,18 @@ seeded from the world seed and the day number, so it is deterministic.
   pause → quit and window close.
 - The **Pupedia** (§10.5) is global across worlds, in
   `user://puppy_kraft_pupedia.cfg`.
+
+The implemented format-1 `[world] clock` snapshot saves day, integer phase and
+pace. A missing snapshot migrates exactly from legacy Normal ticks; a malformed
+or header-inconsistent snapshot is rejected. Gameplay applies the current global
+pace setting on load while preserving the saved day and phase. Lighting remains
+derived and is not stored. No format or PK1 generator bump is required.
+
+The optional `[world] first_steps` snapshot stores an integer prompt (0–5)
+and finite cumulative walking distance (0–4 cells). MOVE requires less than
+four; later prompts require exactly four. Partial progress resumes on load.
+A missing snapshot marks an older world exempt; malformed present data fails
+explicitly. Completed, skipped and legacy-exempt worlds all use DONE.
 
 **Seed words.** A seed is shown and typed as three friendly compound words plus a
 number, such as `SUNNYBISCUIT-GENTLECLOVER-MUDDYBUNNY-42`, from a fixed list of 1024
@@ -439,7 +496,9 @@ glow:
 - Reduced motion turns flowing particle trails into static arrows.
 
 **Implemented slice:** existing PK1 crystal/glow-moss markers use an ore zigzag
-and diamond; the starting bed uses home pawprints. A rebindable L, Hold/Toggle,
+and diamond; the starting bed uses home pawprints; the loose starter stick uses
+dots, a twig icon and STICK. Moving toy positions refresh without terrain edits,
+and a carried stick has no lost-item trail. A rebindable L, Hold/Toggle,
 the caption, six-cell buried outlines, half-speed walking and 48/96-cell
 day/night ranges are playable. Sniff state is transient and menus cancel it.
 Ambient grass/wood do not create trails. Caches, other structure/quest/lost-item
@@ -489,6 +548,22 @@ mechanisms await their systems; Mighty Howl is not exposed.
   the stats and cosmetics set the look, so you never have to wear an ugly
   sweater to stay warm. The HUD shows equipped gear as icons.
 
+**Implemented starter slice:** `sim/fetch_stick.gd` owns one stick beside the
+starting bed. Rebindable E picks it up within 1.5 cells with clear front-layer
+line of sight. E while stopped drops it; movement held and at least 4 cells/s
+in the facing direction throws it at 9 cells/s with 7.5 cells/s upward lift
+*(tune)*. Flight shares the pup's fixed-step grid collision and gravity;
+front solids stop it, back walls do not, and ground drag settles it.
+The release position clips against terrain rather than passing through a wall.
+
+The mouth HUD shows state/refusals. Carrying prevents digging/placing but
+allows bed use and sniff pickup. Solid front placement cannot bury the loose
+toy. Held, flying and settled state are saved; older saves receive the gift
+without changing materials or PK1 terrain. The owner chose persistence and a
+sniff trail, not recall or despawning. The packed building bag and Q/R material
+selection remain unchanged; four quick picks, slotted inventory, other carry
+items, gear and fetch rewards are not implemented.
+
 ---
 
 ## 5. Survival with heart
@@ -510,8 +585,8 @@ warmth never reach 0), **Classic** and **Hardy** (×1.5 drain).
 
 **Implemented basic budget only:** 100 energy, spent only by Woof (3) and Ruff
 (8). After one grounded, inactive second, recover 2 energy per second up to 100.
-Movement, sniffing, digging, placing and barking interrupt rest; paused/modal
-worlds freeze it. Energy, partial rest delay and bark cooldown persist as
+Movement, sniffing, digging, placing, barking and carry input interrupt rest;
+paused/modal worlds freeze it. Energy, partial rest delay and bark cooldown persist as
 optional additive fields in format 1; old saves default to full energy and no
 cooldown. Other drains, food, low-meter consequences, survival-pace choices and
 the other needs are pending. The current bed closes an outing, not a full nap
@@ -1290,6 +1365,7 @@ sim/quest_line.gd              # the Great Bone Quest and the shrine
 sim/vehicles.gd / pets.gd      # after v1
 sim/pupedia.gd                 # global collection log
 sim/world_state.gd             # owns everything; fixed 60 Hz step; events out
+sim/first_steps.gd             # ordered achieved actions and saved walking progress
 sim/world_save.gd              # slot files, deltas, compression, atomic writes
 input/key_source.gd            # per-seat keyboard
 input/pad_source.gd            # gamepads, seat assignment
@@ -1422,7 +1498,9 @@ No `levels`: worlds are slots, not a level list.
 ## 16. Tests — `tests/`
 
 These run headless unless noted. Each one is a standalone `SceneTree` script
-that exits 0.
+that exits 0. The table includes the full-game target; current commands in
+`AGENTS.md` cover 13 implemented headless suites and one real-window view suite.
+All 14 and the 15 framework suites pass; hardware/playtest gates remain open.
 
 | Suite | Covers |
 | --- | --- |
@@ -1434,7 +1512,9 @@ that exits 0.
 | `abilities_test.gd` | Dig times per hardness and tool; place rules and support; Dig Deep; bark ranges and costs; fetch arcs; carry and drop; the mouth wheel |
 | `scent_test.gd` | Trails find caches through blocks; range per breed; night doubling; each scent kind has an icon and a caption; the retreat bundle is always found |
 | `needs_test.gd` | Drain and restore per need; Cozy, Classic and Hardy; hunger never retreats; cold can; the Zoomies buff; huddling |
+| `day_cycle_test.gd` | Exact 12/18/30-minute cycles; phase-preserving pace changes; dusk expiry; eighth-night moon and dawn continuity; legacy clock migration; fixed-step determinism |
 | `lighting_test.gd` | Skylight per column; block light falloff; an edit relights only its chunks; spawn light threshold |
+| `first_steps_test.gd` | Ordered successful actions; actual walking rather than held keys; empty/suppressed input; cancellation; deterministic partial progress; durable Skip |
 | `fluids_test.gd` | Water settles; a dug-out pond refills from a source; the per-tick cap; idle chunks stop updating; falling blocks land |
 | `dens_test.gd` | Valid and invalid rooms (missing door, light, bed, back wall; too small); comfort scoring; respawn point; villager housing |
 | `crafting_test.gd` | Every recipe's ingredients exist; stations; One press and Gestures give the same result; sloppy gestures still craft; recipe discovery |

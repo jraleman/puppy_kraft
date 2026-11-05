@@ -13,6 +13,7 @@ const BuildingHud = preload("res://games/puppy_kraft/ui/pk_hud.gd")
 const Door = preload("res://games/puppy_kraft/ui/den_door.gd")
 const DOOR_SCENE = preload("res://games/puppy_kraft/ui/den_door.tscn")
 const BarkAudio = preload("res://games/puppy_kraft/audio/bark_audio.gd")
+const FirstSteps = preload("res://games/puppy_kraft/sim/first_steps.gd")
 const DOCK_HEIGHT := 146.0
 
 var save_directory := "user://"
@@ -57,6 +58,7 @@ func _prepare_session() -> void:
 func _load_round_settings() -> void:
 	super()
 	if _world != null:
+		_world.clock.set_pace(Settings.tunable_choice(Options.DAY_LENGTH_KEY))
 		_world.set_sniff_mode(Settings.tunable_choice(Options.SNIFF_MODE_KEY)
 			== Options.SNIFF_TOGGLE)
 		_world.set_bark_mode(Settings.tunable_choice(Options.BARK_CHARGE_KEY)
@@ -68,6 +70,11 @@ func _load_round_settings() -> void:
 
 
 func _build_playfield() -> void:
+	_callout.add_theme_color_override("font_color", Color("fff0cc"))
+	_callout.add_theme_color_override("font_outline_color", Color("17202b"))
+	_callout.add_theme_constant_override("outline_size", 4)
+	_callout.add_theme_font_size_override("font_size", 36)
+	_callout.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_saves = Saves.new(save_directory)
 	_view = View.new()
 	_view.name = "PuppyWorld"
@@ -79,6 +86,7 @@ func _build_playfield() -> void:
 	_dock.name = "BuildingHud"
 	_dock.save_requested.connect(func() -> void: _save_world("World saved."))
 	_dock.nap_requested.connect(_show_nap)
+	_dock.skip_first_steps_requested.connect(_skip_first_steps)
 	_playfield.add_child(_dock)
 	_dock.hide()
 	_door = DOOR_SCENE.instantiate()
@@ -121,6 +129,7 @@ func _reset_round_state() -> void:
 		_dock.hide()
 		return
 	_world.begin_outing()
+	_world.clock.set_pace(Settings.tunable_choice(Options.DAY_LENGTH_KEY))
 	_world.set_sniff_mode(Settings.tunable_choice(Options.SNIFF_MODE_KEY)
 		== Options.SNIFF_TOGGLE)
 	_world.set_bark_mode(Settings.tunable_choice(Options.BARK_CHARGE_KEY)
@@ -128,8 +137,8 @@ func _reset_round_state() -> void:
 	_door.hide()
 	_dock.show()
 	_view.present(_world)
-	_dock.present(_world)
-	_save_world("Outing saved. Dig, build and return to the straw bed.")
+	_dock.present(_world, _first_steps_prompt())
+	_save_world("Outing saved. Sniff, fetch, build and return to the straw bed.")
 
 
 func _activate_round() -> void:
@@ -204,10 +213,14 @@ func _update_round(delta: float, _time_left: float) -> void:
 	_player_one_streak.show()
 	_player_one_streak.text = "%d DUG / %d PLACED" % [_world.blocks_dug, _world.blocks_placed]
 	_time_label.text = str(_world.day_number())
-	_callout.text = "SNIFFING / %d-CELL RANGE" % _world.scent.range_cells if _world.sniffing \
-		else (_world.hint if not _world.hint.is_empty() else "SUNNY MEADOWS / PK1")
+	_time_caption.text = _world.clock.phase_name().to_upper()
+	if not _world.clock.caption.is_empty():
+		_callout.text = _world.clock.caption
+	else:
+		_callout.text = "SNIFFING / %d-CELL RANGE" % _world.scent.range_cells if _world.sniffing \
+			else (_world.hint if not _world.hint.is_empty() else "SUNNY MEADOWS / PK1")
 	_view.present(_world, delta)
-	_dock.present(_world)
+	_dock.present(_world, _first_steps_prompt())
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -277,13 +290,29 @@ func _show_nap() -> void:
 func _call_it_a_day() -> void:
 	if _world == null or not _round_active or not _world.near_bed():
 		return
+	var progress := _world.first_steps.snapshot()
+	_world.first_steps.achieve(FirstSteps.Step.HOME)
 	_world.outing_open = false
 	if not _save_world("Outing saved."):
 		_world.outing_open = true
+		_world.first_steps.restore(progress)
 		return
 	_day_finished = true
 	_scores[PLAYER_ONE] = _world.points_pending
 	_end_round()
+
+
+func _skip_first_steps() -> void:
+	if _world == null or not _round_active or get_tree().paused or _door.visible \
+		or _nap_dialog.visible or _error_dialog.visible or _quit_dialog.visible:
+		return
+	if _world.first_steps.step == FirstSteps.Step.DONE:
+		return
+	var progress := _world.first_steps.snapshot()
+	_world.first_steps.skip()
+	if not _save_world("First Steps skipped. Your world and abilities are unchanged."):
+		_world.first_steps.restore(progress)
+	_dock.present(_world, _first_steps_prompt())
 
 
 func _finish_round() -> void:
@@ -341,12 +370,12 @@ func _clear_controls() -> void:
 			_view.clear_barks()
 			_view.present(_world)
 		if _dock != null:
-			_dock.present(_world)
+			_dock.present(_world, _first_steps_prompt())
 
 
 func _configure_mode_ui() -> void:
 	super()
-	_time_caption.text = "DAY" if _world != null else "DEN DOOR"
+	_time_caption.text = _world.clock.phase_name().to_upper() if _world != null else "DEN DOOR"
 	_time_progress.hide()
 	_player_one_streak.visible = _world != null
 	_play_again_button.text = "Keep going"
@@ -361,17 +390,54 @@ func _configure_mode_ui() -> void:
 		_key_label("dig"), _key_label("place"), _key_label("back_wall"),
 		_key_label("wheel_prev"), _key_label("wheel_next"),
 	]
-	_hint.text += "\nMouse: dig/place/wheel  |  Esc pause"
+	_hint.text += "\n%s carry/drop (run to throw)  |  Mouse: dig/place/wheel  |  Esc pause" % [
+		_key_label("carry"),
+	]
+	if _world != null and _dock != null:
+		_dock.present(_world, _first_steps_prompt())
 
 
 func _key_label(suffix: String) -> String:
 	return Settings.binding_key_label("controls/puppy_kraft_" + suffix)
 
 
+func _first_steps_prompt() -> String:
+	var step := _world.first_steps.step
+	var prompt := ""
+	match step:
+		FirstSteps.Step.MOVE:
+			return "Walk %d cells with %s / %s. All abilities are already available." % [
+				int(FirstSteps.WALK_DISTANCE), _key_label("left"), _key_label("right")]
+		FirstSteps.Step.DIG:
+			prompt = "Aim down with %s and hold %s, or hold left mouse on soil, until one block comes loose." % [
+				_key_label("down"), _key_label("dig")]
+			if _world.stick.carried:
+				prompt = "Drop your stick with %s first. " % _key_label("carry") + prompt
+		FirstSteps.Step.SNIFF:
+			var action := "Press" if _world.sniff_toggle else "Hold"
+			return "%s %s to reveal a shaped ORE, HOME or STICK scent trail through blocks." % [
+				action, _key_label("sniff")]
+		FirstSteps.Step.BARK:
+			prompt = "Tap %s once, then wait 0.6 seconds for a free Yip." % _key_label("bark") \
+				if _world.abilities.tap_mode \
+				else "Tap and release %s for a free Yip. Any successful bark counts." % _key_label("bark")
+		FirstSteps.Step.HOME:
+			prompt = "At the straw bed, press %s or choose Call it a day, then confirm to save your diary." % [
+				_key_label("dig")] if _world.near_bed() \
+				else "Follow the HOME trail with %s to the straw bed. Stop sniffing there, then choose Call it a day." % [
+					_key_label("sniff")]
+	if _world.sniffing and (step in [FirstSteps.Step.DIG, FirstSteps.Step.BARK]
+		or (step == FirstSteps.Step.HOME and _world.near_bed())):
+		var stop := "Press %s again" if _world.sniff_toggle else "Release %s"
+		prompt = (stop % _key_label("sniff")) + " to stop sniffing first. " + prompt
+	return prompt
+
+
 func _on_game_setting_changed(key: String, _value: Variant) -> void:
 	if key in [Options.SNIFF_MODE_KEY, Options.BARK_CHARGE_KEY]:
 		_clear_controls()
-	if key in [Options.CAMERA_ZOOM_KEY, Options.SNIFF_MODE_KEY, Options.BARK_CHARGE_KEY]:
+	if key in [Options.CAMERA_ZOOM_KEY, Options.SNIFF_MODE_KEY, Options.BARK_CHARGE_KEY,
+		Options.DAY_LENGTH_KEY]:
 		_load_round_settings()
 		_configure_mode_ui()
 
@@ -404,7 +470,8 @@ func _playfield_bounds() -> Rect2:
 		bottom = minf(bottom, get_viewport().get_visible_rect().end.y - _capture_inset)
 	if _hint.global_position.y > bounds.position.y:
 		bottom = minf(bottom, _hint.global_position.y - 32.0)
-	bounds.size.y = maxf(120.0, bottom - bounds.position.y - _dock_height())
+	var minimum_height := 1.0 if _capture_inset > 0.0 else 120.0
+	bounds.size.y = maxf(minimum_height, bottom - bounds.position.y - _dock_height())
 	return bounds
 
 

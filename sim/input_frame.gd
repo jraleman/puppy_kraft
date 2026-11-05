@@ -12,6 +12,7 @@ var sniff := false
 var sniff_pressed := false
 var bark := false
 var bark_edges: Array[bool] = []
+var carry_pressed := false
 var back_wall := false
 var wheel_delta := 0
 var mouse_aim := false
@@ -24,4 +25,5 @@ func without_edges() -> void:
 	place_pressed = false
 	sniff_pressed = false
 	bark_edges.clear()
+	carry_pressed = false
 	wheel_delta = 0

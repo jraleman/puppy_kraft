@@ -5,13 +5,15 @@ extends RefCounted
 const Blocks = preload("res://games/puppy_kraft/sim/blocks.gd")
 const Chunk = preload("res://games/puppy_kraft/sim/chunk.gd")
 const Grid = preload("res://games/puppy_kraft/sim/world_grid.gd")
+const FetchStick = preload("res://games/puppy_kraft/sim/fetch_stick.gd")
 const BASE_RANGE := 48.0
 const OUTLINE_RANGE := 6.0
 const REFRESH_TICKS := 6
-const KINDS: Array[String] = ["crystal", "home"]
+const KINDS: Array[String] = ["crystal", "home", "stick"]
 const STYLES := {
 	"crystal": {"icon": "ORE", "shape": "zigzag", "color": Color("85e5ee")},
 	"home": {"icon": "HOME", "shape": "pawprints", "color": Color("ffd889")},
+	"stick": {"icon": "STICK", "shape": "dotted", "color": Color("ffc5a1")},
 }
 
 var trails: Array[Dictionary] = []
@@ -28,7 +30,7 @@ func _init() -> void:
 
 
 func scan(grid: Grid, origin: Vector2, night: bool = false,
-	range_multiplier: float = 1.0) -> void:
+	range_multiplier: float = 1.0, stick: FetchStick = null) -> void:
 	assert(origin.is_finite() and is_finite(range_multiplier) and range_multiplier > 0.0,
 		"Scent queries need a finite origin and a positive range multiplier.")
 	if _grid != grid:
@@ -58,6 +60,7 @@ func scan(grid: Grid, origin: Vector2, night: bool = false,
 				var kind := KINDS[_block_kinds[block]]
 				var source := {
 					"kind": kind, "cell": cell, "layer": layer, "block": block,
+					"position": Vector2(cell) + Vector2.ONE * 0.5,
 					"distance_squared": distance,
 				}
 				if not nearest.has(kind) or _nearer(source, nearest[kind]):
@@ -66,6 +69,14 @@ func scan(grid: Grid, origin: Vector2, night: bool = false,
 					and not outlined.has(cell) and _buried(cell, layer):
 					outlined[cell] = true
 					outlines.append(source)
+	if stick != null and not stick.carried:
+		var distance := origin.distance_squared_to(stick.position)
+		if distance <= range_cells * range_cells:
+			nearest["stick"] = {
+				"kind": "stick", "cell": Vector2i(stick.position.floor()),
+				"position": stick.position, "layer": Chunk.FRONT, "block": Blocks.AIR,
+				"distance_squared": distance,
+			}
 	for kind: String in KINDS:
 		if nearest.has(kind):
 			trails.append(nearest[kind])
@@ -80,11 +91,14 @@ func clear() -> void:
 
 func caption(origin: Vector2) -> String:
 	if trails.is_empty():
-		return "Sniffing: no crystal, glow moss or home scent within %d cells." % range_cells
+		return "Sniffing: no crystal, glow moss, home or stick scent within %d cells." % range_cells
 	var source := trails[0]
-	var title := "home" if str(source["kind"]) == "home" \
-		else Blocks.title(int(source["block"])).to_lower()
-	var offset := Vector2(source["cell"]) + Vector2.ONE * 0.5 - origin
+	var title := Blocks.title(int(source["block"])).to_lower()
+	if str(source["kind"]) == "home":
+		title = "home"
+	elif str(source["kind"]) == "stick":
+		title = "your stick"
+	var offset: Vector2 = source["position"] - origin
 	var direction := direction_caption(offset)
 	var layer := " / back wall" if int(source["layer"]) == Chunk.BACK else ""
 	return "Strong scent: %s, %s%s." % [title, direction, layer]

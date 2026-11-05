@@ -44,7 +44,7 @@ func _draw() -> void:
 		_world.body.position + Vector2(_world.body.facing * 0.4, -0.15))
 	for source: Dictionary in _world.scent.trails:
 		var style: Dictionary = Scent.STYLES[str(source["kind"])]
-		var target: Vector2 = _project.call(Vector2(source["cell"]) + Vector2.ONE * 0.5)
+		var target: Vector2 = _project.call(source["position"])
 		target = _clip_target(origin, target)
 		var direction := (target - origin).normalized()
 		var length := origin.distance_to(target)
@@ -52,6 +52,13 @@ func _draw() -> void:
 		color.a = 1.0 if _intense_effects else 0.8
 		if str(style["shape"]) == "zigzag":
 			_zigzag(origin, target, color)
+		elif str(style["shape"]) == "dotted":
+			var distance := 16.0 + _phase
+			while distance < length - 12.0:
+				var at := origin + direction * distance
+				draw_circle(at, 4.5, SHADOW)
+				draw_circle(at, 2.8, color)
+				distance += SPACING
 		else:
 			var distance := 16.0 + _phase
 			while distance < length - 12.0:
@@ -126,6 +133,10 @@ func _paw(at: Vector2, angle: float, color: Color, scale_factor: float = 1.0) ->
 func _icon(at: Vector2, kind: String, color: Color) -> void:
 	if kind == "home":
 		_paw(at, -PI * 0.5, color)
+		return
+	if kind == "stick":
+		_stroke(PackedVector2Array([at + Vector2(-8, 4), at + Vector2(8, -4)]), color, 5.0)
+		_stroke(PackedVector2Array([at, at + Vector2(2, -8)]), color, 3.0)
 		return
 	var points := PackedVector2Array([
 		at + Vector2(0, -9), at + Vector2(6, 0),

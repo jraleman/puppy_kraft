@@ -58,6 +58,12 @@ func _test_world_rest() -> void:
 	world.advance(Body.STEP * 90.0, frame)
 	_expect(world.needs.energy == before and world.needs.rest_ticks == 0,
 		"Active sniffing must neither spend energy nor count as resting.")
+	frame.sniff = false
+	frame.carry_pressed = true
+	world.needs.rest_ticks = Needs.REST_DELAY_TICKS
+	world.advance(Body.STEP, frame)
+	_expect(world.needs.energy == before and world.needs.rest_ticks == 0,
+		"Carry actions must interrupt resting without inventing a fetch-energy cost.")
 
 
 func _test_fixed_step() -> void:

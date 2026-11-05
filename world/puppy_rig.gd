@@ -9,6 +9,8 @@ const Mesher = preload("res://games/puppy_kraft/world/chunk_mesher.gd")
 var reduced_motion := false
 var _tail: Node3D
 var _time := 0.0
+var _material: StandardMaterial3D
+var _nose_glow: MeshInstance3D
 
 
 func _ready() -> void:
@@ -28,6 +30,7 @@ func _ready() -> void:
 				Vector3(0.07, 0.15, 0.075), cream)
 	builder.box(Vector3(0.075, 0.015, 0), Vector3(0.035, 0.22, 0.25), Color("ce776c"))
 	var material := StandardMaterial3D.new()
+	_material = material
 	material.vertex_color_use_as_albedo = true
 	material.roughness = 1.0
 	var mesh := MeshInstance3D.new()
@@ -43,6 +46,20 @@ func _ready() -> void:
 	tail_mesh.mesh = tail_builder.finish()
 	tail_mesh.material_override = material
 	_tail.add_child(tail_mesh)
+	var nose := Builder.new()
+	nose.box(Vector3(0.309, 0.085, 0.015), Vector3(0.012, 0.024, 0.035), Color("f5dfa4"))
+	_nose_glow = MeshInstance3D.new()
+	_nose_glow.mesh = nose.finish()
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.vertex_color_use_as_albedo = true
+	_nose_glow.material_override = glow
+	add_child(_nose_glow)
+
+
+func set_illumination(color: Color, dark: bool) -> void:
+	_material.albedo_color = color
+	_nose_glow.visible = dark
 
 
 func present(body: Body, delta: float) -> void:

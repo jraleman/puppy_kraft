@@ -1,6 +1,6 @@
 extends RefCounted
 
-## Polls held actions and retains ordered bark edges between sampled render frames.
+## Polls held actions and retains bark/carry events between sampled render frames.
 
 const Options = preload("res://games/puppy_kraft/puppy_kraft_options.gd")
 const Frame = preload("res://games/puppy_kraft/sim/input_frame.gd")
@@ -11,6 +11,8 @@ var _place_down := false
 var _sniff_down := false
 var _bark_down := false
 var _bark_edges: Array[bool] = []
+var _carry_down := false
+var _carry_pending := false
 var _previous_down := false
 var _next_down := false
 
@@ -28,6 +30,7 @@ func sample(mouse_cell: Vector2i, mouse_aim: bool, mouse_dig: bool,
 	var place := Input.is_action_pressed(Options.PLACE) or mouse_place
 	var sniff := Input.is_action_pressed(Options.SNIFF)
 	var bark := Input.is_action_pressed(Options.BARK)
+	var carry := Input.is_action_pressed(Options.CARRY)
 	if bark != _bark_down:
 		_bark_edges.append(bark)
 		_bark_down = bark
@@ -42,6 +45,8 @@ func sample(mouse_cell: Vector2i, mouse_aim: bool, mouse_dig: bool,
 	frame.bark = bark
 	frame.bark_edges.assign(_bark_edges)
 	_bark_edges.clear()
+	frame.carry_pressed = _carry_pending or (carry and not _carry_down)
+	_carry_pending = false
 	frame.back_wall = Input.is_action_pressed(Options.BACK_WALL)
 	frame.wheel_delta = wheel + int(next and not _next_down) - int(previous and not _previous_down)
 	frame.mouse_aim = mouse_aim
@@ -50,6 +55,7 @@ func sample(mouse_cell: Vector2i, mouse_aim: bool, mouse_dig: bool,
 	_dig_down = dig
 	_place_down = place
 	_sniff_down = sniff
+	_carry_down = carry
 	_previous_down = previous
 	_next_down = next
 	return frame
@@ -62,6 +68,8 @@ func reset() -> void:
 	_sniff_down = Input.is_action_pressed(Options.SNIFF)
 	_bark_down = Input.is_action_pressed(Options.BARK)
 	_bark_edges.clear()
+	_carry_down = Input.is_action_pressed(Options.CARRY)
+	_carry_pending = false
 	_previous_down = Input.is_action_pressed(Options.WHEEL_PREV)
 	_next_down = Input.is_action_pressed(Options.WHEEL_NEXT)
 
@@ -77,3 +85,8 @@ func handle_event(event: InputEvent) -> void:
 		if _bark_down:
 			_bark_edges.append(false)
 		_bark_down = false
+	if event.is_action_pressed(Options.CARRY):
+		_carry_pending = _carry_pending or not _carry_down
+		_carry_down = true
+	elif event.is_action_released(Options.CARRY):
+		_carry_down = false
